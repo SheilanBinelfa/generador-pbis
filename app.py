@@ -9,35 +9,37 @@ from urllib.parse import urlparse, parse_qs
 st.set_page_config(page_title="Generador de PBIs", page_icon="📋", layout="wide")
 
 SYSTEM_PROMPT = """Eres un asistente experto en Product Management que genera Product Backlog Items (PBIs) para Azure DevOps.
+Tu audiencia son desarrolladores y QA que deben poder implementar y testear sin necesidad de preguntar al PM.
 
 EL INPUT DEL USUARIO PUEDE SER:
-- Texto breve e informal, incluso dictado por voz. Tu trabajo es estructurarlo.
+- Texto breve e informal. Tu trabajo es estructurarlo y completarlo.
 - Una descripción larga de una feature completa. Tu trabajo es proponer la división óptima.
-- Con 2-3 frases + capturas puedes generar un PBI completo.
+- Capturas de prototipo de Figma. Analízalas en detalle: componentes, estados, textos, validaciones visibles, flujos.
 
 REGLAS DE DIVISIÓN:
 - Evalúa la complejidad REAL. Un cambio de validación puntual = 1 PBI.
-- Solo divide cuando hay flujos independientes con complejidad suficiente.
-- En "summary", JUSTIFICA tu decisión: "Es 1 solo PBI porque..." o "Se divide en X PBIs porque..."
-- Si divides, explica qué criterio usaste.
+- Solo divide cuando hay flujos claramente independientes.
+- En "summary", JUSTIFICA tu decisión.
 
 FORMATO DE CADA PBI:
 - Título: [Módulo] - [Feature] - US X.X - [Acción concreta y alcance]
-- Objetivo: UNA frase concisa
+- Objetivo: UNA frase del por qué
 - Historia de Usuario:
-  * COMO [rol]
-  * CUANDO [ruta navegación / pantalla / contexto]
-  * ENTONCES [acción y resultado específico]
-  * PARA [beneficio]
-- Criterios de Aceptación:
-  * Happy Path: flujo principal, concisos
-  * Validaciones: solo las relevantes
-  * Errores: solo si aplica
-- Prototipo: refs a capturas si las hay
-- Dependencias: solo si hay múltiples PBIs relacionados
-- Notas Técnicas: preguntas relevantes para dev
+  * COMO [rol con contexto]
+  * CUANDO [ruta navegación completa: Sección → Subsección → Pantalla]
+  * ENTONCES [acción específica y resultado esperado]
+  * PARA [beneficio concreto]
+- Criterios de Aceptación — NIVEL DE DETALLE ADECUADO:
+  * Happy Path: cada AC debe describir un comportamiento verificable. Incluye datos concretos cuando los haya (nombres de campos, valores, estados, textos de botones visibles en el prototipo).
+  * Validaciones: reglas de negocio, límites, formatos, estados no permitidos. Sé específico con los mensajes de error si son visibles en el prototipo.
+  * Errores: comportamiento ante fallos de red, datos vacíos, timeouts — solo si son relevantes para esta funcionalidad.
+  * Si una funcionalidad tiene múltiples columnas, campos, estados o comportamientos, DETALLA cada uno. No resumas "se muestran los datos" cuando puedes especificar qué datos, en qué columnas, con qué formato.
+- Prototipo: referencia a cada captura indicando EXACTAMENTE qué muestra de relevante para este PBI. Formato: "(Captura X) Muestra [descripción detallada de lo relevante]". Indica el número de captura en orden.
+- Dependencias: entre PBIs si los hay
+- Notas Técnicas: preguntas concretas para desarrollo, no obviedades
 
-CONCISIÓN: ACs directos, 1 línea por AC. No repitas info de la historia. No infles.
+NO seas escueto: un PBI con 2 ACs genéricos no sirve para implementar. Pero tampoco infles con ACs redundantes o que repiten la historia de usuario.
+La regla es: ¿un desarrollador puede implementar esto sin preguntarme nada? ¿QA puede escribir los test cases directamente de los ACs?
 
 RESPONDE SOLO JSON válido sin backticks:
 {
@@ -45,7 +47,7 @@ RESPONDE SOLO JSON válido sin backticks:
   "pbis": [{
     "title": "...", "objective": "...", "role": "...", "when": "...", "then": "...", "benefit": "...",
     "happy_path": ["AC1: ..."], "validations": ["AC-V1: ..."], "error_states": ["AC-E1: ..."],
-    "prototype_refs": ["(Captura X) ..."], "dependencies": [], "tech_notes": ["..."]
+    "prototype_refs": ["(Captura 1) Muestra..."], "dependencies": [], "tech_notes": ["..."]
   }]
 }"""
 
@@ -142,7 +144,7 @@ def get_figma_images(file_key, node_ids, figma_token):
 
 # ========== PBI GENERATION ==========
 
-def pbi_to_html(p):
+def pbi_to_html(p, figma_image_urls=None):
     h = f"<h2>{p['title']}</h2>"
     h += f"<h3>🎯 Objetivo</h3><p>{p['objective']}</p>"
     h += "<h3>👤 Historia de Usuario</h3>"
@@ -162,10 +164,15 @@ def pbi_to_html(p):
             h += f"<li>{e}</li>"
         h += "</ul>"
     if p.get("prototype_refs"):
-        h += "<h3>🖼️ Prototipo</h3><ul>"
-        for r in p["prototype_refs"]:
-            h += f"<li>{r}</li>"
-        h += "</ul>"
+        h += "<h3>🖼️ Prototipo</h3>"
+        for i, r in enumerate(p["prototype_refs"]):
+            h += f"<p>{r}</p>"
+            # Try to match captura number and insert corresponding image
+            cap_match = re.search(r'[Cc]aptura\s*(\d+)', r)
+            if cap_match and figma_image_urls:
+                cap_idx = int(cap_match.group(1)) - 1
+                if 0 <= cap_idx < len(figma_image_urls):
+                    h += f'<p><img src="{figma_image_urls[cap_idx]}" style="max-width:800px;border:1px solid #ddd;border-radius:4px;" /></p>'
     if p.get("dependencies"):
         h += "<h3>🔗 Dependencias</h3><ul>"
         for d in p["dependencies"]:
@@ -212,7 +219,12 @@ def generate_pbis(module, feature, description, context, images):
 # ========== RENDER ==========
 
 def render_pbi_card(pbi, idx, total):
-    html_content = pbi_to_html(pbi)
+    # Get figma image URLs if available
+    figma_urls = []
+    if "figma_images" in st.session_state:
+        figma_urls = [img.get("url", "") for img in st.session_state["figma_images"]]
+    
+    html_content = pbi_to_html(pbi, figma_urls)
 
     st.components.v1.html(f"""
     <div>
