@@ -320,69 +320,93 @@ with st.container(border=True):
 
     # Speech-to-text component
     speech_html = """
-    <div style="margin: -10px 0 10px 0;">
-        <button id="micBtn" onclick="toggleRecording()" style="background:#f1f5f9;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;">
-            <span id="micIcon">🎤</span> <span id="micText">Dictar con voz</span>
-        </button>
-        <span id="micStatus" style="margin-left:8px;font-size:12px;color:#ef4444;display:none;">🔴 Grabando... habla y pulsa para parar</span>
+    <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+            <button id="micBtn" onclick="toggleRecording()" style="background:#f1f5f9;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;">
+                <span id="micIcon">🎤</span> <span id="micText">Dictar con voz</span>
+            </button>
+            <span id="micStatus" style="font-size:12px;color:#ef4444;display:none;">🔴 Grabando...</span>
+            <button id="copyBtn" onclick="copyText()" style="background:#6366f1;color:#fff;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px;font-weight:500;display:none;">📋 Copiar texto</button>
+            <button id="clearBtn" onclick="clearText()" style="background:#f1f5f9;color:#64748b;border:1px solid #d1d5db;border-radius:6px;padding:6px 12px;cursor:pointer;font-size:12px;display:none;">Limpiar</button>
+            <span id="copyStatus" style="font-size:12px;color:#10b981;display:none;">✓ Copiado, pégalo arriba</span>
+        </div>
+        <div id="transcriptBox" style="display:none;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;font-size:14px;color:#334155;line-height:1.6;min-height:40px;">
+            <span id="transcriptText" style="color:#94a3b8;font-style:italic;">Esperando dictado...</span>
+        </div>
     </div>
     <script>
     let recognition = null;
     let isRecording = false;
-    let finalTranscript = "";
+    let fullText = "";
 
     function toggleRecording() {
-        if (isRecording) {
-            stopRecording();
-        } else {
-            startRecording();
-        }
+        if (isRecording) stopRecording();
+        else startRecording();
     }
 
     function startRecording() {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SR) {
-            alert("Tu navegador no soporta dictado por voz. Usa Chrome o Edge.");
-            return;
-        }
+        if (!SR) { alert("Tu navegador no soporta dictado por voz. Usa Chrome o Edge."); return; }
         recognition = new SR();
         recognition.lang = "es-ES";
         recognition.continuous = true;
-        recognition.interimResults = false;
-        finalTranscript = "";
+        recognition.interimResults = true;
 
         recognition.onresult = (e) => {
+            let interim = "";
+            let newFinal = "";
             for (let i = e.resultIndex; i < e.results.length; i++) {
-                if (e.results[i].isFinal) {
-                    finalTranscript += e.results[i][0].transcript + " ";
-                }
+                const t = e.results[i][0].transcript;
+                if (e.results[i].isFinal) newFinal += t + " ";
+                else interim = t;
             }
+            if (newFinal) fullText += newFinal;
+            document.getElementById("transcriptText").innerHTML = fullText + (interim ? '<span style="color:#94a3b8">' + interim + '</span>' : '');
+            document.getElementById("transcriptText").style.color = "#334155";
+            document.getElementById("transcriptText").style.fontStyle = "normal";
         };
 
         recognition.onerror = () => stopRecording();
-        recognition.onend = () => {
-            if (isRecording) {
-                // Send transcript to Streamlit
-                if (finalTranscript.trim()) {
-                    window.parent.postMessage({type: "streamlit:setComponentValue", value: finalTranscript.trim()}, "*");
-                }
-                updateUI(false);
-                isRecording = false;
-            }
-        };
+        recognition.onend = () => { if (isRecording) { try { recognition.start(); } catch(e) { stopRecording(); } } };
 
         recognition.start();
         isRecording = true;
+        document.getElementById("transcriptBox").style.display = "block";
+        document.getElementById("transcriptText").innerHTML = '<span style="color:#94a3b8;font-style:italic;">Escuchando...</span>';
         updateUI(true);
     }
 
     function stopRecording() {
-        if (recognition) recognition.stop();
         isRecording = false;
-        if (finalTranscript.trim()) {
-            window.parent.postMessage({type: "streamlit:setComponentValue", value: finalTranscript.trim()}, "*");
-        }
+        if (recognition) { try { recognition.stop(); } catch(e) {} }
         updateUI(false);
+        if (fullText.trim()) {
+            document.getElementById("copyBtn").style.display = "inline-flex";
+            document.getElementById("clearBtn").style.display = "inline-flex";
+        }
+    }
+
+    async function copyText() {
+        const text = fullText.trim();
+        if (!text) return;
+        try { await navigator.clipboard.writeText(text); }
+        catch(e) {
+            const ta = document.createElement("textarea");
+            ta.value = text; ta.style.cssText = "position:fixed;opacity:0";
+            document.body.appendChild(ta); ta.select();
+            document.execCommand("copy"); document.body.removeChild(ta);
+        }
+        const s = document.getElementById("copyStatus");
+        s.style.display = "inline";
+        setTimeout(() => s.style.display = "none", 3000);
+    }
+
+    function clearText() {
+        fullText = "";
+        document.getElementById("transcriptText").innerHTML = '<span style="color:#94a3b8;font-style:italic;">Esperando dictado...</span>';
+        document.getElementById("copyBtn").style.display = "none";
+        document.getElementById("clearBtn").style.display = "none";
+        document.getElementById("transcriptBox").style.display = "none";
     }
 
     function updateUI(recording) {
@@ -391,31 +415,18 @@ with st.container(border=True):
         const text = document.getElementById("micText");
         const status = document.getElementById("micStatus");
         if (recording) {
-            btn.style.background = "#ef4444";
-            btn.style.color = "#fff";
-            btn.style.borderColor = "#ef4444";
-            icon.textContent = "⏹";
-            text.textContent = "Parar dictado";
+            btn.style.background = "#ef4444"; btn.style.color = "#fff"; btn.style.borderColor = "#ef4444";
+            icon.textContent = "⏹"; text.textContent = "Parar";
             status.style.display = "inline";
         } else {
-            btn.style.background = "#f1f5f9";
-            btn.style.color = "#64748b";
-            btn.style.borderColor = "#d1d5db";
-            icon.textContent = "🎤";
-            text.textContent = "Dictar con voz";
+            btn.style.background = "#f1f5f9"; btn.style.color = "#64748b"; btn.style.borderColor = "#d1d5db";
+            icon.textContent = "🎤"; text.textContent = "Dictar con voz";
             status.style.display = "none";
         }
     }
     </script>
     """
-    speech_result = st.components.v1.html(speech_html, height=45)
-    
-    # Check if speech component returned text
-    if speech_result and isinstance(speech_result, str) and speech_result.strip():
-        current = st.session_state.get("desc_input", "")
-        new_text = current + (" " if current else "") + speech_result
-        st.session_state["desc_input"] = new_text
-        st.rerun()
+    st.components.v1.html(speech_html, height=130)
 
     context = st.text_area(
         "Contexto técnico (opcional)",
