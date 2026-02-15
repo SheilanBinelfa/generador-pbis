@@ -2,7 +2,9 @@ import streamlit as st
 import anthropic
 import json
 import base64
-from io import BytesIO
+import requests
+import re
+from urllib.parse import urlparse, parse_qs
 
 st.set_page_config(page_title="Generador de PBIs", page_icon="📋", layout="wide")
 
@@ -47,6 +49,98 @@ RESPONDE SOLO JSON válido sin backticks:
   }]
 }"""
 
+
+# ========== FIGMA INTEGRATION ==========
+
+def parse_figma_url(url):
+    """Extract file key and node IDs from various Figma URL formats."""
+    url = url.strip()
+    
+    # Proto format: /proto/FILE_KEY/...?node-id=X-Y
+    proto_match = re.search(r'figma\.com/proto/([a-zA-Z0-9]+)', url)
+    # Design format: /design/FILE_KEY/... or /file/FILE_KEY/...
+    design_match = re.search(r'figma\.com/(?:design|file)/([a-zA-Z0-9]+)', url)
+    
+    file_key = None
+    if proto_match:
+        file_key = proto_match.group(1)
+    elif design_match:
+        file_key = design_match.group(1)
+    
+    if not file_key:
+        return None, None
+    
+    # Extract node IDs
+    node_ids = []
+    # From URL params
+    if 'node-id=' in url:
+        nid = re.search(r'node-id=([^&]+)', url)
+        if nid:
+            node_ids.append(nid.group(1).replace('-', ':'))
+    if 'starting-point-node-id=' in url:
+        nid = re.search(r'starting-point-node-id=([^&]+)', url)
+        if nid:
+            node_ids.append(nid.group(1).replace('-', ':'))
+    
+    return file_key, list(set(node_ids))
+
+
+def get_figma_frames(file_key, figma_token):
+    """Get all top-level frames from a Figma file."""
+    headers = {"X-Figma-Token": figma_token}
+    resp = requests.get(f"https://api.figma.com/v1/files/{file_key}?depth=2", headers=headers)
+    
+    if resp.status_code != 200:
+        st.error(f"Error accediendo a Figma: {resp.status_code} - {resp.text[:200]}")
+        return []
+    
+    data = resp.json()
+    frames = []
+    
+    for page in data.get("document", {}).get("children", []):
+        for child in page.get("children", []):
+            if child.get("type") in ["FRAME", "COMPONENT", "SECTION"]:
+                frames.append({
+                    "id": child["id"],
+                    "name": child.get("name", "Sin nombre"),
+                    "type": child.get("type")
+                })
+    
+    return frames
+
+
+def get_figma_images(file_key, node_ids, figma_token):
+    """Export specific nodes as PNG images."""
+    headers = {"X-Figma-Token": figma_token}
+    ids_str = ",".join(node_ids)
+    resp = requests.get(
+        f"https://api.figma.com/v1/images/{file_key}?ids={ids_str}&format=png&scale=2",
+        headers=headers
+    )
+    
+    if resp.status_code != 200:
+        st.error(f"Error exportando imágenes de Figma: {resp.status_code}")
+        return []
+    
+    data = resp.json()
+    images = []
+    
+    for node_id, img_url in data.get("images", {}).items():
+        if img_url:
+            img_resp = requests.get(img_url)
+            if img_resp.status_code == 200:
+                b64 = base64.b64encode(img_resp.content).decode("utf-8")
+                images.append({
+                    "data": b64,
+                    "media_type": "image/png",
+                    "node_id": node_id,
+                    "url": img_url
+                })
+    
+    return images
+
+
+# ========== PBI GENERATION ==========
 
 def pbi_to_html(p):
     h = f"<h2>{p['title']}</h2>"
@@ -97,10 +191,10 @@ def generate_pbis(module, feature, description, context, images):
 
     user_content.append({"type": "text", "text": text})
 
-    for img_data, media_type in images:
+    for img in images:
         user_content.append({
             "type": "image",
-            "source": {"type": "base64", "media_type": media_type, "data": img_data}
+            "source": {"type": "base64", "media_type": img["media_type"], "data": img["data"]}
         })
 
     response = client.messages.create(
@@ -115,108 +209,82 @@ def generate_pbis(module, feature, description, context, images):
     return json.loads(clean)
 
 
+# ========== RENDER ==========
+
 def render_pbi_card(pbi, idx, total):
-    with st.container():
-        st.markdown(f"### US {idx+1}/{total} — {pbi['title']}")
+    html_content = pbi_to_html(pbi)
 
-        # Copy button
-        html_content = pbi_to_html(pbi)
-        st.components.v1.html(f"""
-        <div>
-            <button onclick="copyHtml()" id="copyBtn_{idx}" style="background:#6366f1;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;">
-                📋 Copiar para Azure
-            </button>
-            <span id="status_{idx}" style="margin-left:8px;font-size:13px;color:#10b981;display:none;">✓ Copiado</span>
-        </div>
-        <script>
-        async function copyHtml() {{
-            const html = {json.dumps(html_content)};
-            const plain = {json.dumps(pbi['title'])};
-            try {{
-                await navigator.clipboard.write([
-                    new ClipboardItem({{
-                        "text/html": new Blob([html], {{type: "text/html"}}),
-                        "text/plain": new Blob([plain], {{type: "text/plain"}})
-                    }})
-                ]);
-            }} catch(e) {{
-                const div = document.createElement("div");
-                div.innerHTML = html;
-                div.style.cssText = "position:fixed;left:-9999px;opacity:0";
-                document.body.appendChild(div);
-                const range = document.createRange();
-                range.selectNodeContents(div);
-                const sel = window.getSelection();
-                sel.removeAllRanges();
-                sel.addRange(range);
-                document.execCommand("copy");
-                sel.removeAllRanges();
-                document.body.removeChild(div);
-            }}
-            const s = document.getElementById("status_{idx}");
-            s.style.display = "inline";
-            setTimeout(() => s.style.display = "none", 2000);
+    st.components.v1.html(f"""
+    <div>
+        <button onclick="copyHtml()" style="background:#6366f1;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;">
+            📋 Copiar para Azure
+        </button>
+        <span id="status_{idx}" style="margin-left:8px;font-size:13px;color:#10b981;display:none;">✓ Copiado</span>
+    </div>
+    <script>
+    async function copyHtml() {{
+        const html = {json.dumps(html_content)};
+        const plain = {json.dumps(pbi['title'])};
+        try {{
+            await navigator.clipboard.write([
+                new ClipboardItem({{
+                    "text/html": new Blob([html], {{type: "text/html"}}),
+                    "text/plain": new Blob([plain], {{type: "text/plain"}})
+                }})
+            ]);
+        }} catch(e) {{
+            const div = document.createElement("div");
+            div.innerHTML = html;
+            div.style.cssText = "position:fixed;left:-9999px;opacity:0";
+            document.body.appendChild(div);
+            const range = document.createRange();
+            range.selectNodeContents(div);
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(range);
+            document.execCommand("copy");
+            sel.removeAllRanges();
+            document.body.removeChild(div);
         }}
-        </script>
-        """, height=50)
+        const s = document.getElementById("status_{idx}");
+        s.style.display = "inline";
+        setTimeout(() => s.style.display = "none", 2000);
+    }}
+    </script>
+    """, height=50)
 
-        # Editable fields
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.markdown("**🎯 Objetivo**")
-        with col2:
-            pbi["objective"] = st.text_input("obj", pbi["objective"], key=f"obj_{idx}", label_visibility="collapsed")
+    # Editable fields
+    pbi["objective"] = st.text_input("🎯 Objetivo", pbi["objective"], key=f"obj_{idx}")
 
-        st.markdown("**👤 Historia de Usuario**")
-        c1, c2 = st.columns([0.15, 0.85])
-        with c1:
-            st.markdown("**Como**")
-        with c2:
-            pbi["role"] = st.text_input("r", pbi["role"], key=f"role_{idx}", label_visibility="collapsed")
+    st.markdown("**👤 Historia de Usuario**")
+    pbi["role"] = st.text_input("Como", pbi["role"], key=f"role_{idx}")
+    pbi["when"] = st.text_input("Cuando", pbi["when"], key=f"when_{idx}")
+    pbi["then"] = st.text_input("Entonces", pbi["then"], key=f"then_{idx}")
+    pbi["benefit"] = st.text_input("Para", pbi["benefit"], key=f"ben_{idx}")
 
-        c1, c2 = st.columns([0.15, 0.85])
-        with c1:
-            st.markdown("**Cuando**")
-        with c2:
-            pbi["when"] = st.text_input("w", pbi["when"], key=f"when_{idx}", label_visibility="collapsed")
+    st.markdown("**✅ Happy Path**")
+    for i, ac in enumerate(pbi.get("happy_path", [])):
+        pbi["happy_path"][i] = st.text_input(f"AC{i+1}", ac, key=f"hp_{idx}_{i}", label_visibility="collapsed")
 
-        c1, c2 = st.columns([0.15, 0.85])
-        with c1:
-            st.markdown("**Entonces**")
-        with c2:
-            pbi["then"] = st.text_input("t", pbi["then"], key=f"then_{idx}", label_visibility="collapsed")
+    if pbi.get("validations"):
+        st.markdown("**⚠️ Validaciones**")
+        for i, v in enumerate(pbi["validations"]):
+            pbi["validations"][i] = st.text_input(f"V{i+1}", v, key=f"v_{idx}_{i}", label_visibility="collapsed")
 
-        c1, c2 = st.columns([0.15, 0.85])
-        with c1:
-            st.markdown("**Para**")
-        with c2:
-            pbi["benefit"] = st.text_input("b", pbi["benefit"], key=f"ben_{idx}", label_visibility="collapsed")
+    if pbi.get("error_states"):
+        st.markdown("**🚨 Estados de Error**")
+        for i, e in enumerate(pbi["error_states"]):
+            pbi["error_states"][i] = st.text_input(f"E{i+1}", e, key=f"e_{idx}_{i}", label_visibility="collapsed")
 
-        st.markdown("**✅ Happy Path**")
-        for i, ac in enumerate(pbi.get("happy_path", [])):
-            pbi["happy_path"][i] = st.text_input(f"hp{i}", ac, key=f"hp_{idx}_{i}", label_visibility="collapsed")
+    if pbi.get("prototype_refs"):
+        st.markdown("**🖼️ Prototipo**")
+        for i, r in enumerate(pbi["prototype_refs"]):
+            pbi["prototype_refs"][i] = st.text_input(f"P{i+1}", r, key=f"pr_{idx}_{i}", label_visibility="collapsed")
 
-        if pbi.get("validations"):
-            st.markdown("**⚠️ Validaciones y Edge Cases**")
-            for i, v in enumerate(pbi["validations"]):
-                pbi["validations"][i] = st.text_input(f"v{i}", v, key=f"v_{idx}_{i}", label_visibility="collapsed")
-
-        if pbi.get("error_states"):
-            st.markdown("**🚨 Estados de Error**")
-            for i, e in enumerate(pbi["error_states"]):
-                pbi["error_states"][i] = st.text_input(f"e{i}", e, key=f"e_{idx}_{i}", label_visibility="collapsed")
-
-        if pbi.get("prototype_refs"):
-            st.markdown("**🖼️ Prototipo**")
-            for i, r in enumerate(pbi["prototype_refs"]):
-                pbi["prototype_refs"][i] = st.text_input(f"pr{i}", r, key=f"pr_{idx}_{i}", label_visibility="collapsed")
-
-        if pbi.get("tech_notes"):
-            st.markdown("**💡 Notas Técnicas**")
-            for i, n in enumerate(pbi["tech_notes"]):
-                pbi["tech_notes"][i] = st.text_input(f"tn{i}", n, key=f"tn_{idx}_{i}", label_visibility="collapsed")
-
-        st.divider()
+    if pbi.get("tech_notes"):
+        st.markdown("**💡 Notas Técnicas**")
+        for i, n in enumerate(pbi["tech_notes"]):
+            pbi["tech_notes"][i] = st.text_input(f"N{i+1}", n, key=f"tn_{idx}_{i}", label_visibility="collapsed")
 
 
 # ========== MAIN UI ==========
@@ -224,7 +292,6 @@ def render_pbi_card(pbi, idx, total):
 st.title("📋 Generador de PBIs")
 st.caption("Describe la funcionalidad → genera, edita y copia PBIs para Azure DevOps")
 
-# Input form
 with st.container(border=True):
     col1, col2 = st.columns(2)
     with col1:
@@ -244,44 +311,122 @@ with st.container(border=True):
         height=80
     )
 
-    uploaded_files = st.file_uploader(
-        "Capturas del prototipo",
-        type=["png", "jpg", "jpeg", "webp"],
-        accept_multiple_files=True,
-        help="Sube capturas de Figma o cualquier imagen del prototipo"
-    )
+    # Figma integration
+    st.markdown("---")
+    st.markdown("**🎨 Prototipo**")
+    
+    figma_available = "FIGMA_TOKEN" in st.secrets
+    
+    tab_figma, tab_upload = st.tabs(["🔗 Enlace de Figma", "📁 Subir capturas"])
+    
+    with tab_figma:
+        if figma_available:
+            figma_url = st.text_input(
+                "URL del prototipo de Figma",
+                placeholder="https://www.figma.com/proto/... o https://www.figma.com/design/...",
+                key="figma_url"
+            )
+            
+            if figma_url:
+                file_key, node_ids = parse_figma_url(figma_url)
+                
+                if file_key:
+                    st.success(f"✅ Archivo detectado: `{file_key}`")
+                    
+                    if st.button("🔍 Cargar frames de Figma"):
+                        with st.spinner("Conectando con Figma..."):
+                            frames = get_figma_frames(file_key, st.secrets["FIGMA_TOKEN"])
+                        
+                        if frames:
+                            st.session_state["figma_frames"] = frames
+                            st.session_state["figma_file_key"] = file_key
+                            st.info(f"Se encontraron {len(frames)} frames en el archivo")
+                        else:
+                            st.warning("No se encontraron frames. Verifica que el token tiene acceso al archivo.")
+                    
+                    # Show frames for selection
+                    if "figma_frames" in st.session_state:
+                        frames = st.session_state["figma_frames"]
+                        frame_names = [f"{f['name']} ({f['type']})" for f in frames]
+                        selected = st.multiselect(
+                            "Selecciona los frames a incluir como capturas:",
+                            options=range(len(frames)),
+                            format_func=lambda i: frame_names[i],
+                            key="selected_frames"
+                        )
+                        
+                        if selected and st.button("📸 Exportar frames seleccionados"):
+                            selected_ids = [frames[i]["id"] for i in selected]
+                            with st.spinner(f"Exportando {len(selected_ids)} frames..."):
+                                figma_images = get_figma_images(
+                                    st.session_state["figma_file_key"],
+                                    selected_ids,
+                                    st.secrets["FIGMA_TOKEN"]
+                                )
+                            
+                            if figma_images:
+                                st.session_state["figma_images"] = figma_images
+                                st.success(f"✅ {len(figma_images)} capturas exportadas")
+                                
+                                # Show previews
+                                cols = st.columns(min(len(figma_images), 4))
+                                for i, img in enumerate(figma_images):
+                                    with cols[i % 4]:
+                                        img_bytes = base64.b64decode(img["data"])
+                                        st.image(img_bytes, caption=f"Captura {i+1}", width=150)
+                else:
+                    st.error("URL no válida. Usa una URL de Figma (proto, design o file).")
+        else:
+            st.info("Para conectar con Figma, añade `FIGMA_TOKEN` en los Secrets de tu app en Streamlit Cloud. "
+                    "Puedes generarlo en Figma → Settings → Personal access tokens.")
 
-    # Show uploaded images
-    if uploaded_files:
-        cols = st.columns(min(len(uploaded_files), 5))
-        for i, f in enumerate(uploaded_files):
-            with cols[i % 5]:
-                st.image(f, caption=f"Captura {i+1}", width=120)
+    with tab_upload:
+        uploaded_files = st.file_uploader(
+            "Sube capturas manualmente",
+            type=["png", "jpg", "jpeg", "webp"],
+            accept_multiple_files=True,
+            help="Capturas de Figma o cualquier imagen del prototipo"
+        )
+        if uploaded_files:
+            cols = st.columns(min(len(uploaded_files), 5))
+            for i, f in enumerate(uploaded_files):
+                with cols[i % 5]:
+                    st.image(f, caption=f"Captura {i+1}", width=120)
 
+    # Generate button
     generate_btn = st.button("🚀 Generar PBIs", type="primary", use_container_width=True)
 
 
-# Process
+# ========== PROCESS ==========
+
 if generate_btn:
     if not description.strip():
         st.error("Añade una descripción funcional")
     else:
-        images = []
+        # Collect all images
+        all_images = []
+        
+        # From Figma
+        if "figma_images" in st.session_state:
+            for img in st.session_state["figma_images"]:
+                all_images.append({"data": img["data"], "media_type": img["media_type"]})
+        
+        # From uploaded files
         if uploaded_files:
             for f in uploaded_files:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
-                mt = f.type or "image/png"
-                images.append((b64, mt))
+                all_images.append({"data": b64, "media_type": f.type or "image/png"})
 
         with st.spinner("Analizando y generando PBIs..."):
             try:
-                result = generate_pbis(module, feature, description, context, images)
+                result = generate_pbis(module, feature, description, context, all_images)
                 st.session_state["result"] = result
             except Exception as e:
                 st.error(f"Error al generar: {e}")
 
 
-# Display results
+# ========== DISPLAY RESULTS ==========
+
 if "result" in st.session_state:
     result = st.session_state["result"]
 
