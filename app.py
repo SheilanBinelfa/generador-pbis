@@ -314,8 +314,108 @@ with st.container(border=True):
     description = st.text_area(
         "Descripción funcional *",
         placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
-        height=150
+        height=150,
+        key="desc_input"
     )
+
+    # Speech-to-text component
+    speech_html = """
+    <div style="margin: -10px 0 10px 0;">
+        <button id="micBtn" onclick="toggleRecording()" style="background:#f1f5f9;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;">
+            <span id="micIcon">🎤</span> <span id="micText">Dictar con voz</span>
+        </button>
+        <span id="micStatus" style="margin-left:8px;font-size:12px;color:#ef4444;display:none;">🔴 Grabando... habla y pulsa para parar</span>
+    </div>
+    <script>
+    let recognition = null;
+    let isRecording = false;
+    let finalTranscript = "";
+
+    function toggleRecording() {
+        if (isRecording) {
+            stopRecording();
+        } else {
+            startRecording();
+        }
+    }
+
+    function startRecording() {
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) {
+            alert("Tu navegador no soporta dictado por voz. Usa Chrome o Edge.");
+            return;
+        }
+        recognition = new SR();
+        recognition.lang = "es-ES";
+        recognition.continuous = true;
+        recognition.interimResults = false;
+        finalTranscript = "";
+
+        recognition.onresult = (e) => {
+            for (let i = e.resultIndex; i < e.results.length; i++) {
+                if (e.results[i].isFinal) {
+                    finalTranscript += e.results[i][0].transcript + " ";
+                }
+            }
+        };
+
+        recognition.onerror = () => stopRecording();
+        recognition.onend = () => {
+            if (isRecording) {
+                // Send transcript to Streamlit
+                if (finalTranscript.trim()) {
+                    window.parent.postMessage({type: "streamlit:setComponentValue", value: finalTranscript.trim()}, "*");
+                }
+                updateUI(false);
+                isRecording = false;
+            }
+        };
+
+        recognition.start();
+        isRecording = true;
+        updateUI(true);
+    }
+
+    function stopRecording() {
+        if (recognition) recognition.stop();
+        isRecording = false;
+        if (finalTranscript.trim()) {
+            window.parent.postMessage({type: "streamlit:setComponentValue", value: finalTranscript.trim()}, "*");
+        }
+        updateUI(false);
+    }
+
+    function updateUI(recording) {
+        const btn = document.getElementById("micBtn");
+        const icon = document.getElementById("micIcon");
+        const text = document.getElementById("micText");
+        const status = document.getElementById("micStatus");
+        if (recording) {
+            btn.style.background = "#ef4444";
+            btn.style.color = "#fff";
+            btn.style.borderColor = "#ef4444";
+            icon.textContent = "⏹";
+            text.textContent = "Parar dictado";
+            status.style.display = "inline";
+        } else {
+            btn.style.background = "#f1f5f9";
+            btn.style.color = "#64748b";
+            btn.style.borderColor = "#d1d5db";
+            icon.textContent = "🎤";
+            text.textContent = "Dictar con voz";
+            status.style.display = "none";
+        }
+    }
+    </script>
+    """
+    speech_result = st.components.v1.html(speech_html, height=45)
+    
+    # Check if speech component returned text
+    if speech_result and isinstance(speech_result, str) and speech_result.strip():
+        current = st.session_state.get("desc_input", "")
+        new_text = current + (" " if current else "") + speech_result
+        st.session_state["desc_input"] = new_text
+        st.rerun()
 
     context = st.text_area(
         "Contexto técnico (opcional)",
