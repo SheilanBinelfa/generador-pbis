@@ -63,13 +63,37 @@ def get_azure_connection():
     )
 
 
+def upload_image_to_azure(wit_client, image_b64, filename, project):
+    """Upload an image as attachment to Azure DevOps and return the URL."""
+    import io
+    image_bytes = base64.b64decode(image_b64)
+    stream = io.BytesIO(image_bytes)
+    attachment = wit_client.create_attachment(upload_stream=stream, file_name=filename, project=project)
+    return attachment.url
+
+
 def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, figma_b64=None, figma_link=None, existing_id=None):
     from azure.devops.v7_1.work_item_tracking.models import JsonPatchOperation
     conn = get_azure_connection()
     wit_client = conn.clients.get_work_item_tracking_client()
     project = st.secrets["AZURE_PROJECT"]
 
-    html_desc = pbi_to_html(pbi, figma_b64, figma_link)
+    # Upload images as attachments and get permanent URLs
+    attachment_urls = []
+    if figma_b64:
+        for i, b64 in enumerate(figma_b64):
+            if b64:
+                try:
+                    url = upload_image_to_azure(wit_client, b64, f"captura_{i+1}.png", project)
+                    attachment_urls.append(url)
+                except Exception as e:
+                    st.warning(f"No se pudo subir Captura {i+1}: {e}")
+                    attachment_urls.append(None)
+            else:
+                attachment_urls.append(None)
+
+    # Build HTML with attachment URLs instead of base64
+    html_desc = pbi_to_html_with_urls(pbi, attachment_urls, figma_link)
 
     if existing_id:
         # Update existing work item
@@ -205,6 +229,55 @@ def pbi_to_html(p, figma_images_b64=None, figma_link=None):
         for i, b64 in enumerate(figma_images_b64):
             h += f"<p><b>({i})</b></p>"
             h += f'<p><img src="data:image/png;base64,{b64}" style="max-width:800px;border:1px solid #ddd;border-radius:4px;" /></p>'
+    if p.get("dependencies"):
+        h += "<h3>🔗 Dependencias</h3><ul>"
+        for d in p["dependencies"]:
+            h += f"<li>{d}</li>"
+        h += "</ul>"
+    if p.get("tech_notes"):
+        h += "<h3>💡 Notas Técnicas</h3><ul>"
+        for n in p["tech_notes"]:
+            h += f"<li>{n}</li>"
+        h += "</ul>"
+    return h
+
+
+def pbi_to_html_with_urls(p, attachment_urls=None, figma_link=None):
+    """Generate HTML using Azure attachment URLs for images (for Push to Azure)."""
+    h = f"<h2>{p['title']}</h2>"
+    h += f"<h3>🎯 Objetivo</h3><p>{p['objective']}</p>"
+    h += "<h3>👤 Historia de Usuario</h3>"
+    h += f"<p><b>Como</b> {p['role']}<br><b>Cuando</b> {p['when']}<br><b>Entonces</b> {p['then']}<br><b>Para</b> {p['benefit']}</p>"
+    h += "<h3>✅ Criterios de Aceptación</h3><h4>Happy Path</h4><ul>"
+    for ac in p.get("happy_path", []):
+        h += f"<li>{ac}</li>"
+    h += "</ul>"
+    if p.get("validations"):
+        h += "<h4>Validaciones y Edge Cases</h4><ul>"
+        for v in p["validations"]:
+            h += f"<li>{v}</li>"
+        h += "</ul>"
+    if p.get("error_states"):
+        h += "<h4>Estados de Error</h4><ul>"
+        for e in p["error_states"]:
+            h += f"<li>{e}</li>"
+        h += "</ul>"
+    h += "<h3>🖼️ Prototipo</h3>"
+    if figma_link:
+        h += f'<p><a href="{figma_link}">Ver prototipo en Figma</a></p>'
+    if p.get("prototype_refs"):
+        for i, r in enumerate(p["prototype_refs"]):
+            h += f"<p><b>{r}</b></p>"
+            cap_match = re.search(r'[Cc]aptura\s*(\d+)', r)
+            if cap_match and attachment_urls:
+                cap_idx = int(cap_match.group(1)) - 1
+                if 0 <= cap_idx < len(attachment_urls) and attachment_urls[cap_idx]:
+                    h += f'<p><img src="{attachment_urls[cap_idx]}" style="max-width:800px;" /></p>'
+    elif attachment_urls:
+        for i, url in enumerate(attachment_urls):
+            if url:
+                h += f"<p><b>({i})</b></p>"
+                h += f'<p><img src="{url}" style="max-width:800px;" /></p>'
     if p.get("dependencies"):
         h += "<h3>🔗 Dependencias</h3><ul>"
         for d in p["dependencies"]:
