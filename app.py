@@ -63,7 +63,7 @@ def get_azure_connection():
     )
 
 
-def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, figma_urls=None, figma_link=None):
+def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, figma_urls=None, figma_link=None, existing_id=None):
     from azure.devops.v7_1.work_item_tracking.models import JsonPatchOperation
     conn = get_azure_connection()
     wit_client = conn.clients.get_work_item_tracking_client()
@@ -71,27 +71,41 @@ def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, 
 
     html_desc = pbi_to_html(pbi, figma_urls, figma_link)
 
-    patch = [
-        {"op": "add", "path": "/fields/System.Title", "value": pbi["title"]},
-        {"op": "add", "path": "/fields/System.Description", "value": html_desc},
-    ]
+    if existing_id:
+        # Update existing work item
+        patch = [
+            {"op": "replace", "path": "/fields/System.Title", "value": pbi["title"]},
+            {"op": "replace", "path": "/fields/System.Description", "value": html_desc},
+        ]
+        if iteration_path:
+            patch.append({"op": "replace", "path": "/fields/System.IterationPath", "value": iteration_path})
+        if area_path:
+            patch.append({"op": "replace", "path": "/fields/System.AreaPath", "value": area_path})
 
-    if iteration_path:
-        patch.append({"op": "add", "path": "/fields/System.IterationPath", "value": iteration_path})
-    if area_path:
-        patch.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
-    if parent_id:
-        patch.append({
-            "op": "add",
-            "path": "/relations/-",
-            "value": {
-                "rel": "System.LinkTypes.Hierarchy-Reverse",
-                "url": f"https://dev.azure.com/{st.secrets['AZURE_ORG']}/_apis/wit/workItems/{parent_id}",
-            }
-        })
+        patch_ops = [JsonPatchOperation(**p) for p in patch]
+        return wit_client.update_work_item(document=patch_ops, id=existing_id, project=project)
+    else:
+        # Create new work item
+        patch = [
+            {"op": "add", "path": "/fields/System.Title", "value": pbi["title"]},
+            {"op": "add", "path": "/fields/System.Description", "value": html_desc},
+        ]
+        if iteration_path:
+            patch.append({"op": "add", "path": "/fields/System.IterationPath", "value": iteration_path})
+        if area_path:
+            patch.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
+        if parent_id:
+            patch.append({
+                "op": "add",
+                "path": "/relations/-",
+                "value": {
+                    "rel": "System.LinkTypes.Hierarchy-Reverse",
+                    "url": f"https://dev.azure.com/{st.secrets['AZURE_ORG']}/_apis/wit/workItems/{parent_id}",
+                }
+            })
 
-    patch_ops = [JsonPatchOperation(**p) for p in patch]
-    return wit_client.create_work_item(document=patch_ops, project=project, type="Product Backlog Item")
+        patch_ops = [JsonPatchOperation(**p) for p in patch]
+        return wit_client.create_work_item(document=patch_ops, project=project, type="Product Backlog Item")
 
 
 # ========== FIGMA INTEGRATION ==========
@@ -287,24 +301,40 @@ def render_pbi_card(pbi, idx, total):
     with col_push:
         if azure_available:
             with st.popover("🚀 Push to Azure", use_container_width=True):
-                st.markdown(f"**Crear en Azure DevOps:**\n\n`{pbi['title']}`")
+                st.markdown(f"**`{pbi['title']}`**")
+                
+                mode = st.radio("Acción", ["Crear nuevo PBI", "Actualizar PBI existente"], key=f"mode_{idx}", horizontal=True)
+                
+                existing_id = None
+                if mode == "Actualizar PBI existente":
+                    existing_id_str = st.text_input("ID del Work Item a actualizar", placeholder="Ej: 203734", key=f"existing_{idx}")
+                    if existing_id_str:
+                        existing_id = int(existing_id_str)
+                
                 iteration = st.text_input("Iteration Path (Sprint)", placeholder="Ej: SWAre\\2026\\PRODUCT\\Q1\\IT3", key=f"iter_{idx}")
                 area = st.text_input("Area Path", placeholder="Ej: SWAre\\Time", key=f"area_{idx}")
-                parent = st.text_input("Parent Feature ID (opcional)", placeholder="Ej: 177040", key=f"parent_{idx}")
-
-                if st.button("✅ Crear PBI", key=f"push_{idx}", type="primary", use_container_width=True):
-                    with st.spinner("Creando en Azure DevOps..."):
+                
+                parent = ""
+                if mode == "Crear nuevo PBI":
+                    parent = st.text_input("Parent Feature ID (opcional)", placeholder="Ej: 177040", key=f"parent_{idx}")
+                
+                btn_label = "✅ Actualizar PBI" if existing_id else "✅ Crear PBI"
+                
+                if st.button(btn_label, key=f"push_{idx}", type="primary", use_container_width=True):
+                    with st.spinner("Enviando a Azure DevOps..."):
                         try:
-                            parent_id = int(parent) if parent.strip() else None
+                            parent_id = int(parent) if parent and parent.strip() else None
                             result = push_pbi_to_azure(
                                 pbi,
                                 iteration_path=iteration if iteration.strip() else None,
                                 area_path=area if area.strip() else None,
                                 parent_id=parent_id,
                                 figma_urls=figma_urls,
-                                figma_link=figma_link
+                                figma_link=figma_link,
+                                existing_id=existing_id
                             )
-                            st.success(f"✅ PBI creado — ID: **{result.id}** — [Abrir en Azure](https://dev.azure.com/{st.secrets['AZURE_ORG']}/{st.secrets['AZURE_PROJECT']}/_workitems/edit/{result.id})")
+                            action = "actualizado" if existing_id else "creado"
+                            st.success(f"✅ PBI {action} — ID: **{result.id}** — [Abrir en Azure](https://dev.azure.com/{st.secrets['AZURE_ORG']}/{st.secrets['AZURE_PROJECT']}/_workitems/edit/{result.id})")
                         except Exception as e:
                             st.error(f"Error: {e}")
 
