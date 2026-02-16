@@ -63,13 +63,13 @@ def get_azure_connection():
     )
 
 
-def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, figma_urls=None):
+def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, figma_urls=None, figma_link=None):
     from azure.devops.v7_1.work_item_tracking.models import JsonPatchOperation
     conn = get_azure_connection()
     wit_client = conn.clients.get_work_item_tracking_client()
     project = st.secrets["AZURE_PROJECT"]
 
-    html_desc = pbi_to_html(pbi, figma_urls)
+    html_desc = pbi_to_html(pbi, figma_urls, figma_link)
 
     patch = [
         {"op": "add", "path": "/fields/System.Title", "value": pbi["title"]},
@@ -153,7 +153,7 @@ def get_figma_images(file_key, node_ids, figma_token):
 
 # ========== PBI FORMATTING ==========
 
-def pbi_to_html(p, figma_image_urls=None):
+def pbi_to_html(p, figma_image_urls=None, figma_link=None):
     h = f"<h2>{p['title']}</h2>"
     h += f"<h3>🎯 Objetivo</h3><p>{p['objective']}</p>"
     h += "<h3>👤 Historia de Usuario</h3>"
@@ -172,8 +172,11 @@ def pbi_to_html(p, figma_image_urls=None):
         for e in p["error_states"]:
             h += f"<li>{e}</li>"
         h += "</ul>"
+    # Prototype section with Figma link and embedded images
+    h += "<h3>🖼️ Prototipo</h3>"
+    if figma_link:
+        h += f'<p><b>Figma:</b> <a href="{figma_link}">{figma_link}</a></p>'
     if p.get("prototype_refs"):
-        h += "<h3>🖼️ Prototipo</h3>"
         for i, r in enumerate(p["prototype_refs"]):
             h += f"<p>{r}</p>"
             cap_match = re.search(r'[Cc]aptura\s*(\d+)', r)
@@ -230,10 +233,11 @@ def generate_pbis(module, feature, description, context, images):
 
 def render_pbi_card(pbi, idx, total):
     figma_urls = []
+    figma_link = st.session_state.get("figma_url", None)
     if "figma_images" in st.session_state:
         figma_urls = [img.get("url", "") for img in st.session_state["figma_images"]]
 
-    html_content = pbi_to_html(pbi, figma_urls)
+    html_content = pbi_to_html(pbi, figma_urls, figma_link)
 
     # Buttons row
     col_copy, col_push = st.columns([1, 1])
@@ -297,7 +301,8 @@ def render_pbi_card(pbi, idx, total):
                                 iteration_path=iteration if iteration.strip() else None,
                                 area_path=area if area.strip() else None,
                                 parent_id=parent_id,
-                                figma_urls=figma_urls
+                                figma_urls=figma_urls,
+                                figma_link=figma_link
                             )
                             st.success(f"✅ PBI creado — ID: **{result.id}** — [Abrir en Azure](https://dev.azure.com/{st.secrets['AZURE_ORG']}/{st.secrets['AZURE_PROJECT']}/_workitems/edit/{result.id})")
                         except Exception as e:
