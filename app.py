@@ -4,9 +4,6 @@ import json
 import base64
 import requests
 import re
-from urllib.parse import urlparse, parse_qs
-from azure.devops.connection import Connection
-from msrest.authentication import BasicAuthentication
 
 st.set_page_config(page_title="Generador de PBIs", page_icon="📋", layout="wide")
 
@@ -57,74 +54,32 @@ RESPONDE SOLO JSON válido sin backticks:
 # ========== AZURE DEVOPS INTEGRATION ==========
 
 def get_azure_connection():
-    """Create Azure DevOps connection."""
+    from azure.devops.connection import Connection
+    from msrest.authentication import BasicAuthentication
     credentials = BasicAuthentication("", st.secrets["AZURE_PAT"])
-    connection = Connection(
+    return Connection(
         base_url=f"https://dev.azure.com/{st.secrets['AZURE_ORG']}",
         creds=credentials
     )
-    return connection
-
-
-def get_azure_iterations():
-    """Get available iterations/sprints."""
-    try:
-        conn = get_azure_connection()
-        work_client = conn.clients.get_work_client()
-        team_context = {"project": st.secrets["AZURE_PROJECT"]}
-        iterations = work_client.get_team_iterations(team_context)
-        return [{"name": it.name, "path": it.path, "id": it.id} for it in iterations]
-    except Exception as e:
-        st.error(f"Error obteniendo sprints: {e}")
-        return []
-
-
-def get_azure_areas():
-    """Get available area paths."""
-    try:
-        conn = get_azure_connection()
-        wit_client = conn.clients.get_work_item_tracking_client()
-        project = st.secrets["AZURE_PROJECT"]
-        root = wit_client.get_classification_node(project, "Areas", depth=3)
-        
-        areas = [root.name]
-        def collect_areas(node, prefix=""):
-            path = f"{prefix}\\{node.name}" if prefix else node.name
-            areas.append(path)
-            if node.children:
-                for child in node.children:
-                    collect_areas(child, path)
-        
-        if root.children:
-            for child in root.children:
-                collect_areas(child, root.name)
-        return areas
-    except Exception as e:
-        st.error(f"Error obteniendo áreas: {e}")
-        return []
 
 
 def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, figma_urls=None):
-    """Create a PBI in Azure DevOps."""
+    from azure.devops.v7_1.work_item_tracking.models import JsonPatchOperation
     conn = get_azure_connection()
     wit_client = conn.clients.get_work_item_tracking_client()
     project = st.secrets["AZURE_PROJECT"]
-    
-    # Build HTML description
+
     html_desc = pbi_to_html(pbi, figma_urls)
-    
-    # Build patch document
+
     patch = [
         {"op": "add", "path": "/fields/System.Title", "value": pbi["title"]},
         {"op": "add", "path": "/fields/System.Description", "value": html_desc},
     ]
-    
+
     if iteration_path:
         patch.append({"op": "add", "path": "/fields/System.IterationPath", "value": iteration_path})
-    
     if area_path:
         patch.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
-    
     if parent_id:
         patch.append({
             "op": "add",
@@ -134,158 +89,54 @@ def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, 
                 "url": f"https://dev.azure.com/{st.secrets['AZURE_ORG']}/_apis/wit/workItems/{parent_id}",
             }
         })
-    
-    from azure.devops.v7_1.work_item_tracking.models import JsonPatchOperation
+
     patch_ops = [JsonPatchOperation(**p) for p in patch]
-    
-    result = wit_client.create_work_item(
-        document=patch_ops,
-        project=project,
-        type="Product Backlog Item"
-    )
-    
-    return result
+    return wit_client.create_work_item(document=patch_ops, project=project, type="Product Backlog Item")
 
 
 # ========== FIGMA INTEGRATION ==========
 
 def parse_figma_url(url):
-    """Extract file key and node IDs from various Figma URL formats."""
     url = url.strip()
-    
-    # Proto format: /proto/FILE_KEY/...?node-id=X-Y
     proto_match = re.search(r'figma\.com/proto/([a-zA-Z0-9]+)', url)
-    # Design format: /design/FILE_KEY/... or /file/FILE_KEY/...
     design_match = re.search(r'figma\.com/(?:design|file)/([a-zA-Z0-9]+)', url)
-    
+
     file_key = None
     if proto_match:
         file_key = proto_match.group(1)
     elif design_match:
         file_key = design_match.group(1)
-    
+
     if not file_key:
         return None, None
-    
-    # Extract node IDs
-    node_ids = []
-    # From URL params
+
+    node_ids = set()
     if 'node-id=' in url:
         nid = re.search(r'node-id=([^&]+)', url)
         if nid:
-            node_ids.append(nid.group(1).replace('-', ':'))
+            node_ids.add(nid.group(1).replace('-', ':'))
     if 'starting-point-node-id=' in url:
         nid = re.search(r'starting-point-node-id=([^&]+)', url)
         if nid:
-            node_ids.append(nid.group(1).replace('-', ':'))
-    
-    return file_key, list(set(node_ids))
+            node_ids.add(nid.group(1).replace('-', ':'))
 
-
-def get_figma_frames(file_key, figma_token, node_ids=None):
-    """Get frames from a Figma file. If node_ids provided, get children of those nodes."""
-    headers = {"X-Figma-Token": figma_token}
-    
-    if node_ids:
-        # Fetch specific nodes and their children
-        ids_str = ",".join(node_ids)
-        resp = requests.get(
-            f"https://api.figma.com/v1/files/{file_key}/nodes?ids={ids_str}&depth=3",
-            headers=headers
-        )
-        
-        if resp.status_code != 200:
-            st.error(f"Error accediendo a Figma: {resp.status_code} - {resp.text[:200]}")
-            return []
-        
-        data = resp.json()
-        frames = []
-        
-        def collect_frames(node, depth=0):
-            """Recursively collect frames from node tree."""
-            node_type = node.get("type", "")
-            name = node.get("name", "Sin nombre")
-            
-            # Include the node itself if it's a frame-like element
-            if node_type in ["FRAME", "COMPONENT", "INSTANCE", "GROUP", "SECTION"]:
-                frames.append({
-                    "id": node["id"],
-                    "name": name,
-                    "type": node_type
-                })
-            
-            # Recurse into children
-            for child in node.get("children", []):
-                collect_frames(child, depth + 1)
-        
-        for node_id, node_data in data.get("nodes", {}).items():
-            doc = node_data.get("document", {})
-            # Add the root node itself
-            frames.append({
-                "id": doc["id"],
-                "name": f"📌 {doc.get('name', 'Pantalla principal')} (raíz)",
-                "type": doc.get("type", "")
-            })
-            # Add direct children only (not deeply nested)
-            for child in doc.get("children", []):
-                child_type = child.get("type", "")
-                if child_type in ["FRAME", "COMPONENT", "INSTANCE", "GROUP", "SECTION"]:
-                    frames.append({
-                        "id": child["id"],
-                        "name": child.get("name", "Sin nombre"),
-                        "type": child_type
-                    })
-                    # One more level for modals, overlays, etc.
-                    for subchild in child.get("children", []):
-                        sub_type = subchild.get("type", "")
-                        if sub_type in ["FRAME", "COMPONENT", "INSTANCE"]:
-                            frames.append({
-                                "id": subchild["id"],
-                                "name": f"  └ {subchild.get('name', 'Sin nombre')}",
-                                "type": sub_type
-                            })
-        
-        return frames
-    
-    else:
-        # Fallback: get top-level frames
-        resp = requests.get(f"https://api.figma.com/v1/files/{file_key}?depth=2", headers=headers)
-        
-        if resp.status_code != 200:
-            st.error(f"Error accediendo a Figma: {resp.status_code} - {resp.text[:200]}")
-            return []
-        
-        data = resp.json()
-        frames = []
-        
-        for page in data.get("document", {}).get("children", []):
-            for child in page.get("children", []):
-                if child.get("type") in ["FRAME", "COMPONENT", "SECTION"]:
-                    frames.append({
-                        "id": child["id"],
-                        "name": child.get("name", "Sin nombre"),
-                        "type": child.get("type")
-                    })
-        
-        return frames
+    return file_key, list(node_ids)
 
 
 def get_figma_images(file_key, node_ids, figma_token):
-    """Export specific nodes as PNG images."""
     headers = {"X-Figma-Token": figma_token}
     ids_str = ",".join(node_ids)
     resp = requests.get(
         f"https://api.figma.com/v1/images/{file_key}?ids={ids_str}&format=png&scale=2",
         headers=headers
     )
-    
+
     if resp.status_code != 200:
         st.error(f"Error exportando imágenes de Figma: {resp.status_code}")
         return []
-    
+
     data = resp.json()
     images = []
-    
     for node_id, img_url in data.get("images", {}).items():
         if img_url:
             img_resp = requests.get(img_url)
@@ -297,11 +148,10 @@ def get_figma_images(file_key, node_ids, figma_token):
                     "node_id": node_id,
                     "url": img_url
                 })
-    
     return images
 
 
-# ========== PBI GENERATION ==========
+# ========== PBI FORMATTING ==========
 
 def pbi_to_html(p, figma_image_urls=None):
     h = f"<h2>{p['title']}</h2>"
@@ -326,7 +176,6 @@ def pbi_to_html(p, figma_image_urls=None):
         h += "<h3>🖼️ Prototipo</h3>"
         for i, r in enumerate(p["prototype_refs"]):
             h += f"<p>{r}</p>"
-            # Try to match captura number and insert corresponding image
             cap_match = re.search(r'[Cc]aptura\s*(\d+)', r)
             if cap_match and figma_image_urls:
                 cap_idx = int(cap_match.group(1)) - 1
@@ -344,6 +193,8 @@ def pbi_to_html(p, figma_image_urls=None):
         h += "</ul>"
     return h
 
+
+# ========== PBI GENERATION ==========
 
 def generate_pbis(module, feature, description, context, images):
     client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
@@ -375,19 +226,18 @@ def generate_pbis(module, feature, description, context, images):
     return json.loads(clean)
 
 
-# ========== RENDER ==========
+# ========== RENDER PBI CARD ==========
 
 def render_pbi_card(pbi, idx, total):
-    # Get figma image URLs if available
     figma_urls = []
     if "figma_images" in st.session_state:
         figma_urls = [img.get("url", "") for img in st.session_state["figma_images"]]
-    
+
     html_content = pbi_to_html(pbi, figma_urls)
 
-    # Copy and Push buttons row
+    # Buttons row
     col_copy, col_push = st.columns([1, 1])
-    
+
     with col_copy:
         st.components.v1.html(f"""
         <div>
@@ -429,33 +279,15 @@ def render_pbi_card(pbi, idx, total):
         """, height=50)
 
     azure_available = all(k in st.secrets for k in ["AZURE_PAT", "AZURE_ORG", "AZURE_PROJECT"])
-    
+
     with col_push:
         if azure_available:
             with st.popover("🚀 Push to Azure", use_container_width=True):
                 st.markdown(f"**Crear en Azure DevOps:**\n\n`{pbi['title']}`")
-                
-                # Iteration path
-                iteration = st.text_input(
-                    "Iteration Path (Sprint)", 
-                    placeholder="Ej: SWAre\\2026\\PRODUCT\\Q1\\IT3",
-                    key=f"iter_{idx}"
-                )
-                
-                # Area path
-                area = st.text_input(
-                    "Area Path",
-                    placeholder="Ej: SWAre\\Time",
-                    key=f"area_{idx}"
-                )
-                
-                # Parent work item
-                parent = st.text_input(
-                    "Parent Feature ID (opcional)",
-                    placeholder="Ej: 177040",
-                    key=f"parent_{idx}"
-                )
-                
+                iteration = st.text_input("Iteration Path (Sprint)", placeholder="Ej: SWAre\\2026\\PRODUCT\\Q1\\IT3", key=f"iter_{idx}")
+                area = st.text_input("Area Path", placeholder="Ej: SWAre\\Time", key=f"area_{idx}")
+                parent = st.text_input("Parent Feature ID (opcional)", placeholder="Ej: 177040", key=f"parent_{idx}")
+
                 if st.button("✅ Crear PBI", key=f"push_{idx}", type="primary", use_container_width=True):
                     with st.spinner("Creando en Azure DevOps..."):
                         try:
@@ -470,8 +302,6 @@ def render_pbi_card(pbi, idx, total):
                             st.success(f"✅ PBI creado — ID: **{result.id}** — [Abrir en Azure](https://dev.azure.com/{st.secrets['AZURE_ORG']}/{st.secrets['AZURE_PROJECT']}/_workitems/edit/{result.id})")
                         except Exception as e:
                             st.error(f"Error: {e}")
-        else:
-            st.caption("Configura AZURE_PAT, AZURE_ORG y AZURE_PROJECT en Secrets para habilitar Push to Azure")
 
     # Editable fields
     pbi["objective"] = st.text_input("🎯 Objetivo", pbi["objective"], key=f"obj_{idx}")
@@ -509,8 +339,70 @@ def render_pbi_card(pbi, idx, total):
 
 # ========== MAIN UI ==========
 
-st.title("📋 Generador de PBIs")
-st.caption("Describe la funcionalidad → genera, edita y copia PBIs para Azure DevOps")
+# Custom CSS for Endalia branding
+st.markdown("""
+<style>
+    /* Header bar */
+    .endalia-header {
+        background: linear-gradient(135deg, #1A56DB, #2563EB);
+        padding: 24px 32px;
+        border-radius: 12px;
+        margin-bottom: 24px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+    }
+    .endalia-header svg {
+        width: 40px;
+        height: 40px;
+    }
+    .endalia-header h1 {
+        color: white !important;
+        font-size: 24px !important;
+        font-weight: 700 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+    .endalia-header p {
+        color: rgba(255,255,255,0.8);
+        font-size: 14px;
+        margin: 4px 0 0 0;
+    }
+    
+    /* Primary buttons */
+    .stButton > button[kind="primary"] {
+        background-color: #1A56DB !important;
+        border-color: #1A56DB !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background-color: #1E40AF !important;
+        border-color: #1E40AF !important;
+    }
+    
+    /* Expander headers */
+    .streamlit-expanderHeader {
+        font-weight: 600 !important;
+    }
+    
+    /* Info boxes */
+    .stAlert [data-testid="stAlertContentInfo"] {
+        border-left-color: #1A56DB;
+    }
+</style>
+
+<div class="endalia-header">
+    <div>
+        <svg viewBox="0 0 40 40" fill="none">
+            <rect width="40" height="40" rx="10" fill="white" fill-opacity="0.15"/>
+            <path d="M20 8C13.37 8 8 13.37 8 20s5.37 12 12 12 12-5.37 12-12S26.63 8 20 8zm-2 17.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5zm6-7c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z" fill="white"/>
+        </svg>
+    </div>
+    <div>
+        <h1>📋 Generador de PBIs</h1>
+        <p>Describe la funcionalidad → genera, edita y copia PBIs para Azure DevOps</p>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
 with st.container(border=True):
     col1, col2 = st.columns(2)
@@ -642,14 +534,14 @@ with st.container(border=True):
         height=80
     )
 
-    # Figma integration
+    # Prototype section
     st.markdown("---")
     st.markdown("**🎨 Prototipo**")
-    
+
     figma_available = "FIGMA_TOKEN" in st.secrets
-    
+
     tab_figma, tab_upload = st.tabs(["🔗 Enlace de Figma", "📁 Subir capturas"])
-    
+
     with tab_figma:
         if figma_available:
             figma_url = st.text_input(
@@ -657,66 +549,53 @@ with st.container(border=True):
                 placeholder="https://www.figma.com/proto/... o https://www.figma.com/design/...",
                 key="figma_url"
             )
-            
+
             if figma_url:
                 file_key, node_ids = parse_figma_url(figma_url)
-                
+
                 if file_key:
-                    node_info = ""
-                    if node_ids:
-                        node_info = f" | Nodo específico detectado: `{', '.join(node_ids)}`"
-                    st.success(f"✅ Archivo detectado: `{file_key}`{node_info}")
-                    
-                    if st.button("🔍 Cargar frames de Figma"):
-                        with st.spinner("Conectando con Figma..."):
-                            frames = get_figma_frames(
-                                file_key, 
-                                st.secrets["FIGMA_TOKEN"],
-                                node_ids=node_ids if node_ids else None
-                            )
-                        
-                        if frames:
-                            st.session_state["figma_frames"] = frames
-                            st.session_state["figma_file_key"] = file_key
-                            st.info(f"Se encontraron {len(frames)} frames en el archivo")
-                        else:
-                            st.warning("No se encontraron frames. Verifica que el token tiene acceso al archivo.")
-                    
-                    # Show frames for selection
-                    if "figma_frames" in st.session_state:
-                        frames = st.session_state["figma_frames"]
-                        frame_names = [f"{f['name']} ({f['type']})" for f in frames]
-                        selected = st.multiselect(
-                            "Selecciona los frames a incluir como capturas:",
-                            options=range(len(frames)),
-                            format_func=lambda i: frame_names[i],
-                            key="selected_frames"
+                    st.success(f"✅ Archivo detectado")
+
+                    if st.button("📸 Capturar pantalla de Figma"):
+                        with st.spinner("Exportando desde Figma..."):
+                            export_ids = node_ids if node_ids else []
+
+                            if not export_ids:
+                                st.warning("No se detectó un nodo específico en la URL. Abre la pantalla concreta en Figma y copia la URL desde ahí.")
+                            else:
+                                figma_images = get_figma_images(file_key, export_ids, st.secrets["FIGMA_TOKEN"])
+
+                                if figma_images:
+                                    st.session_state["figma_images"] = figma_images
+                                    st.success(f"✅ {len(figma_images)} captura(s) exportada(s)")
+                                else:
+                                    st.error("No se pudo exportar la imagen. Verifica que el token tiene acceso al archivo.")
+
+                    # Show exported images
+                    if "figma_images" in st.session_state and st.session_state["figma_images"]:
+                        st.markdown("**Capturas exportadas:**")
+                        for i, img in enumerate(st.session_state["figma_images"]):
+                            img_bytes = base64.b64decode(img["data"])
+                            st.image(img_bytes, caption=f"Captura {i+1}", use_container_width=True)
+
+                        extra_nodes = st.text_input(
+                            "¿Más pantallas? Pega otra URL de Figma",
+                            placeholder="https://www.figma.com/design/...?node-id=XXXX-YYYY",
+                            key="extra_figma"
                         )
-                        
-                        if selected and st.button("📸 Exportar frames seleccionados"):
-                            selected_ids = [frames[i]["id"] for i in selected]
-                            with st.spinner(f"Exportando {len(selected_ids)} frames..."):
-                                figma_images = get_figma_images(
-                                    st.session_state["figma_file_key"],
-                                    selected_ids,
-                                    st.secrets["FIGMA_TOKEN"]
-                                )
-                            
-                            if figma_images:
-                                st.session_state["figma_images"] = figma_images
-                                st.success(f"✅ {len(figma_images)} capturas exportadas")
-                                
-                                # Show previews
-                                cols = st.columns(min(len(figma_images), 4))
-                                for i, img in enumerate(figma_images):
-                                    with cols[i % 4]:
-                                        img_bytes = base64.b64decode(img["data"])
-                                        st.image(img_bytes, caption=f"Captura {i+1}", width=150)
+                        if extra_nodes and st.button("➕ Añadir captura"):
+                            extra_key, extra_ids = parse_figma_url(extra_nodes)
+                            if extra_key and extra_ids:
+                                with st.spinner("Exportando..."):
+                                    extra_images = get_figma_images(extra_key, extra_ids, st.secrets["FIGMA_TOKEN"])
+                                    if extra_images:
+                                        st.session_state["figma_images"].extend(extra_images)
+                                        st.success(f"✅ Añadida(s) {len(extra_images)} captura(s)")
+                                        st.rerun()
                 else:
                     st.error("URL no válida. Usa una URL de Figma (proto, design o file).")
         else:
-            st.info("Para conectar con Figma, añade `FIGMA_TOKEN` en los Secrets de tu app en Streamlit Cloud. "
-                    "Puedes generarlo en Figma → Settings → Personal access tokens.")
+            st.info("Para conectar con Figma, añade `FIGMA_TOKEN` en los Secrets de tu app.")
 
     with tab_upload:
         uploaded_files = st.file_uploader(
@@ -741,15 +620,12 @@ if generate_btn:
     if not description.strip():
         st.error("Añade una descripción funcional")
     else:
-        # Collect all images
         all_images = []
-        
-        # From Figma
+
         if "figma_images" in st.session_state:
             for img in st.session_state["figma_images"]:
                 all_images.append({"data": img["data"], "media_type": img["media_type"]})
-        
-        # From uploaded files
+
         if uploaded_files:
             for f in uploaded_files:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
