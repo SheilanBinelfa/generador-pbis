@@ -182,28 +182,92 @@ def parse_figma_url(url):
     return file_key, list(set(node_ids))
 
 
-def get_figma_frames(file_key, figma_token):
-    """Get all top-level frames from a Figma file."""
+def get_figma_frames(file_key, figma_token, node_ids=None):
+    """Get frames from a Figma file. If node_ids provided, get children of those nodes."""
     headers = {"X-Figma-Token": figma_token}
-    resp = requests.get(f"https://api.figma.com/v1/files/{file_key}?depth=2", headers=headers)
     
-    if resp.status_code != 200:
-        st.error(f"Error accediendo a Figma: {resp.status_code} - {resp.text[:200]}")
-        return []
-    
-    data = resp.json()
-    frames = []
-    
-    for page in data.get("document", {}).get("children", []):
-        for child in page.get("children", []):
-            if child.get("type") in ["FRAME", "COMPONENT", "SECTION"]:
+    if node_ids:
+        # Fetch specific nodes and their children
+        ids_str = ",".join(node_ids)
+        resp = requests.get(
+            f"https://api.figma.com/v1/files/{file_key}/nodes?ids={ids_str}&depth=3",
+            headers=headers
+        )
+        
+        if resp.status_code != 200:
+            st.error(f"Error accediendo a Figma: {resp.status_code} - {resp.text[:200]}")
+            return []
+        
+        data = resp.json()
+        frames = []
+        
+        def collect_frames(node, depth=0):
+            """Recursively collect frames from node tree."""
+            node_type = node.get("type", "")
+            name = node.get("name", "Sin nombre")
+            
+            # Include the node itself if it's a frame-like element
+            if node_type in ["FRAME", "COMPONENT", "INSTANCE", "GROUP", "SECTION"]:
                 frames.append({
-                    "id": child["id"],
-                    "name": child.get("name", "Sin nombre"),
-                    "type": child.get("type")
+                    "id": node["id"],
+                    "name": name,
+                    "type": node_type
                 })
+            
+            # Recurse into children
+            for child in node.get("children", []):
+                collect_frames(child, depth + 1)
+        
+        for node_id, node_data in data.get("nodes", {}).items():
+            doc = node_data.get("document", {})
+            # Add the root node itself
+            frames.append({
+                "id": doc["id"],
+                "name": f"📌 {doc.get('name', 'Pantalla principal')} (raíz)",
+                "type": doc.get("type", "")
+            })
+            # Add direct children only (not deeply nested)
+            for child in doc.get("children", []):
+                child_type = child.get("type", "")
+                if child_type in ["FRAME", "COMPONENT", "INSTANCE", "GROUP", "SECTION"]:
+                    frames.append({
+                        "id": child["id"],
+                        "name": child.get("name", "Sin nombre"),
+                        "type": child_type
+                    })
+                    # One more level for modals, overlays, etc.
+                    for subchild in child.get("children", []):
+                        sub_type = subchild.get("type", "")
+                        if sub_type in ["FRAME", "COMPONENT", "INSTANCE"]:
+                            frames.append({
+                                "id": subchild["id"],
+                                "name": f"  └ {subchild.get('name', 'Sin nombre')}",
+                                "type": sub_type
+                            })
+        
+        return frames
     
-    return frames
+    else:
+        # Fallback: get top-level frames
+        resp = requests.get(f"https://api.figma.com/v1/files/{file_key}?depth=2", headers=headers)
+        
+        if resp.status_code != 200:
+            st.error(f"Error accediendo a Figma: {resp.status_code} - {resp.text[:200]}")
+            return []
+        
+        data = resp.json()
+        frames = []
+        
+        for page in data.get("document", {}).get("children", []):
+            for child in page.get("children", []):
+                if child.get("type") in ["FRAME", "COMPONENT", "SECTION"]:
+                    frames.append({
+                        "id": child["id"],
+                        "name": child.get("name", "Sin nombre"),
+                        "type": child.get("type")
+                    })
+        
+        return frames
 
 
 def get_figma_images(file_key, node_ids, figma_token):
@@ -598,11 +662,18 @@ with st.container(border=True):
                 file_key, node_ids = parse_figma_url(figma_url)
                 
                 if file_key:
-                    st.success(f"✅ Archivo detectado: `{file_key}`")
+                    node_info = ""
+                    if node_ids:
+                        node_info = f" | Nodo específico detectado: `{', '.join(node_ids)}`"
+                    st.success(f"✅ Archivo detectado: `{file_key}`{node_info}")
                     
                     if st.button("🔍 Cargar frames de Figma"):
                         with st.spinner("Conectando con Figma..."):
-                            frames = get_figma_frames(file_key, st.secrets["FIGMA_TOKEN"])
+                            frames = get_figma_frames(
+                                file_key, 
+                                st.secrets["FIGMA_TOKEN"],
+                                node_ids=node_ids if node_ids else None
+                            )
                         
                         if frames:
                             st.session_state["figma_frames"] = frames
