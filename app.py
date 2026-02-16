@@ -5,6 +5,8 @@ import base64
 import requests
 import re
 from urllib.parse import urlparse, parse_qs
+from azure.devops.connection import Connection
+from msrest.authentication import BasicAuthentication
 
 st.set_page_config(page_title="Generador de PBIs", page_icon="📋", layout="wide")
 
@@ -50,6 +52,99 @@ RESPONDE SOLO JSON válido sin backticks:
     "prototype_refs": ["(Captura 1) Muestra..."], "dependencies": [], "tech_notes": ["..."]
   }]
 }"""
+
+
+# ========== AZURE DEVOPS INTEGRATION ==========
+
+def get_azure_connection():
+    """Create Azure DevOps connection."""
+    credentials = BasicAuthentication("", st.secrets["AZURE_PAT"])
+    connection = Connection(
+        base_url=f"https://dev.azure.com/{st.secrets['AZURE_ORG']}",
+        creds=credentials
+    )
+    return connection
+
+
+def get_azure_iterations():
+    """Get available iterations/sprints."""
+    try:
+        conn = get_azure_connection()
+        work_client = conn.clients.get_work_client()
+        team_context = {"project": st.secrets["AZURE_PROJECT"]}
+        iterations = work_client.get_team_iterations(team_context)
+        return [{"name": it.name, "path": it.path, "id": it.id} for it in iterations]
+    except Exception as e:
+        st.error(f"Error obteniendo sprints: {e}")
+        return []
+
+
+def get_azure_areas():
+    """Get available area paths."""
+    try:
+        conn = get_azure_connection()
+        wit_client = conn.clients.get_work_item_tracking_client()
+        project = st.secrets["AZURE_PROJECT"]
+        root = wit_client.get_classification_node(project, "Areas", depth=3)
+        
+        areas = [root.name]
+        def collect_areas(node, prefix=""):
+            path = f"{prefix}\\{node.name}" if prefix else node.name
+            areas.append(path)
+            if node.children:
+                for child in node.children:
+                    collect_areas(child, path)
+        
+        if root.children:
+            for child in root.children:
+                collect_areas(child, root.name)
+        return areas
+    except Exception as e:
+        st.error(f"Error obteniendo áreas: {e}")
+        return []
+
+
+def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, figma_urls=None):
+    """Create a PBI in Azure DevOps."""
+    conn = get_azure_connection()
+    wit_client = conn.clients.get_work_item_tracking_client()
+    project = st.secrets["AZURE_PROJECT"]
+    
+    # Build HTML description
+    html_desc = pbi_to_html(pbi, figma_urls)
+    
+    # Build patch document
+    patch = [
+        {"op": "add", "path": "/fields/System.Title", "value": pbi["title"]},
+        {"op": "add", "path": "/fields/System.Description", "value": html_desc},
+    ]
+    
+    if iteration_path:
+        patch.append({"op": "add", "path": "/fields/System.IterationPath", "value": iteration_path})
+    
+    if area_path:
+        patch.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
+    
+    if parent_id:
+        patch.append({
+            "op": "add",
+            "path": "/relations/-",
+            "value": {
+                "rel": "System.LinkTypes.Hierarchy-Reverse",
+                "url": f"https://dev.azure.com/{st.secrets['AZURE_ORG']}/_apis/wit/workItems/{parent_id}",
+            }
+        })
+    
+    from azure.devops.v7_1.work_item_tracking.models import JsonPatchOperation
+    patch_ops = [JsonPatchOperation(**p) for p in patch]
+    
+    result = wit_client.create_work_item(
+        document=patch_ops,
+        project=project,
+        type="Product Backlog Item"
+    )
+    
+    return result
 
 
 # ========== FIGMA INTEGRATION ==========
@@ -226,44 +321,93 @@ def render_pbi_card(pbi, idx, total):
     
     html_content = pbi_to_html(pbi, figma_urls)
 
-    st.components.v1.html(f"""
-    <div>
-        <button onclick="copyHtml()" style="background:#6366f1;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;">
-            📋 Copiar para Azure
-        </button>
-        <span id="status_{idx}" style="margin-left:8px;font-size:13px;color:#10b981;display:none;">✓ Copiado</span>
-    </div>
-    <script>
-    async function copyHtml() {{
-        const html = {json.dumps(html_content)};
-        const plain = {json.dumps(pbi['title'])};
-        try {{
-            await navigator.clipboard.write([
-                new ClipboardItem({{
-                    "text/html": new Blob([html], {{type: "text/html"}}),
-                    "text/plain": new Blob([plain], {{type: "text/plain"}})
-                }})
-            ]);
-        }} catch(e) {{
-            const div = document.createElement("div");
-            div.innerHTML = html;
-            div.style.cssText = "position:fixed;left:-9999px;opacity:0";
-            document.body.appendChild(div);
-            const range = document.createRange();
-            range.selectNodeContents(div);
-            const sel = window.getSelection();
-            sel.removeAllRanges();
-            sel.addRange(range);
-            document.execCommand("copy");
-            sel.removeAllRanges();
-            document.body.removeChild(div);
+    # Copy and Push buttons row
+    col_copy, col_push = st.columns([1, 1])
+    
+    with col_copy:
+        st.components.v1.html(f"""
+        <div>
+            <button onclick="copyHtml()" style="background:#6366f1;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;">
+                📋 Copiar para Azure
+            </button>
+            <span id="status_{idx}" style="margin-left:8px;font-size:13px;color:#10b981;display:none;">✓ Copiado</span>
+        </div>
+        <script>
+        async function copyHtml() {{
+            const html = {json.dumps(html_content)};
+            const plain = {json.dumps(pbi['title'])};
+            try {{
+                await navigator.clipboard.write([
+                    new ClipboardItem({{
+                        "text/html": new Blob([html], {{type: "text/html"}}),
+                        "text/plain": new Blob([plain], {{type: "text/plain"}})
+                    }})
+                ]);
+            }} catch(e) {{
+                const div = document.createElement("div");
+                div.innerHTML = html;
+                div.style.cssText = "position:fixed;left:-9999px;opacity:0";
+                document.body.appendChild(div);
+                const range = document.createRange();
+                range.selectNodeContents(div);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+                document.execCommand("copy");
+                sel.removeAllRanges();
+                document.body.removeChild(div);
+            }}
+            const s = document.getElementById("status_{idx}");
+            s.style.display = "inline";
+            setTimeout(() => s.style.display = "none", 2000);
         }}
-        const s = document.getElementById("status_{idx}");
-        s.style.display = "inline";
-        setTimeout(() => s.style.display = "none", 2000);
-    }}
-    </script>
-    """, height=50)
+        </script>
+        """, height=50)
+
+    azure_available = all(k in st.secrets for k in ["AZURE_PAT", "AZURE_ORG", "AZURE_PROJECT"])
+    
+    with col_push:
+        if azure_available:
+            with st.popover("🚀 Push to Azure", use_container_width=True):
+                st.markdown(f"**Crear en Azure DevOps:**\n\n`{pbi['title']}`")
+                
+                # Iteration path
+                iteration = st.text_input(
+                    "Iteration Path (Sprint)", 
+                    placeholder="Ej: SWAre\\2026\\PRODUCT\\Q1\\IT3",
+                    key=f"iter_{idx}"
+                )
+                
+                # Area path
+                area = st.text_input(
+                    "Area Path",
+                    placeholder="Ej: SWAre\\Time",
+                    key=f"area_{idx}"
+                )
+                
+                # Parent work item
+                parent = st.text_input(
+                    "Parent Feature ID (opcional)",
+                    placeholder="Ej: 177040",
+                    key=f"parent_{idx}"
+                )
+                
+                if st.button("✅ Crear PBI", key=f"push_{idx}", type="primary", use_container_width=True):
+                    with st.spinner("Creando en Azure DevOps..."):
+                        try:
+                            parent_id = int(parent) if parent.strip() else None
+                            result = push_pbi_to_azure(
+                                pbi,
+                                iteration_path=iteration if iteration.strip() else None,
+                                area_path=area if area.strip() else None,
+                                parent_id=parent_id,
+                                figma_urls=figma_urls
+                            )
+                            st.success(f"✅ PBI creado — ID: **{result.id}** — [Abrir en Azure](https://dev.azure.com/{st.secrets['AZURE_ORG']}/{st.secrets['AZURE_PROJECT']}/_workitems/edit/{result.id})")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+        else:
+            st.caption("Configura AZURE_PAT, AZURE_ORG y AZURE_PROJECT en Secrets para habilitar Push to Azure")
 
     # Editable fields
     pbi["objective"] = st.text_input("🎯 Objetivo", pbi["objective"], key=f"obj_{idx}")
