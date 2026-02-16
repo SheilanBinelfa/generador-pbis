@@ -63,13 +63,13 @@ def get_azure_connection():
     )
 
 
-def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, figma_urls=None, figma_link=None, existing_id=None):
+def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, figma_b64=None, figma_link=None, existing_id=None):
     from azure.devops.v7_1.work_item_tracking.models import JsonPatchOperation
     conn = get_azure_connection()
     wit_client = conn.clients.get_work_item_tracking_client()
     project = st.secrets["AZURE_PROJECT"]
 
-    html_desc = pbi_to_html(pbi, figma_urls, figma_link)
+    html_desc = pbi_to_html(pbi, figma_b64, figma_link)
 
     if existing_id:
         # Update existing work item
@@ -167,7 +167,7 @@ def get_figma_images(file_key, node_ids, figma_token):
 
 # ========== PBI FORMATTING ==========
 
-def pbi_to_html(p, figma_image_urls=None, figma_link=None):
+def pbi_to_html(p, figma_images_b64=None, figma_link=None):
     h = f"<h2>{p['title']}</h2>"
     h += f"<h3>🎯 Objetivo</h3><p>{p['objective']}</p>"
     h += "<h3>👤 Historia de Usuario</h3>"
@@ -186,18 +186,25 @@ def pbi_to_html(p, figma_image_urls=None, figma_link=None):
         for e in p["error_states"]:
             h += f"<li>{e}</li>"
         h += "</ul>"
-    # Prototype section with Figma link and embedded images
+    # Prototype section
     h += "<h3>🖼️ Prototipo</h3>"
     if figma_link:
-        h += f'<p><b>Figma:</b> <a href="{figma_link}">{figma_link}</a></p>'
+        h += f'<p><a href="{figma_link}">Ver prototipo en Figma</a></p>'
     if p.get("prototype_refs"):
         for i, r in enumerate(p["prototype_refs"]):
-            h += f"<p>{r}</p>"
+            h += f"<p><b>{r}</b></p>"
+            # Insert image below each reference
             cap_match = re.search(r'[Cc]aptura\s*(\d+)', r)
-            if cap_match and figma_image_urls:
+            if cap_match and figma_images_b64:
                 cap_idx = int(cap_match.group(1)) - 1
-                if 0 <= cap_idx < len(figma_image_urls):
-                    h += f'<p><img src="{figma_image_urls[cap_idx]}" style="max-width:800px;border:1px solid #ddd;border-radius:4px;" /></p>'
+                if 0 <= cap_idx < len(figma_images_b64):
+                    b64 = figma_images_b64[cap_idx]
+                    h += f'<p><img src="data:image/png;base64,{b64}" style="max-width:800px;border:1px solid #ddd;border-radius:4px;" /></p>'
+    elif figma_images_b64:
+        # If no prototype_refs but we have images, show them numbered
+        for i, b64 in enumerate(figma_images_b64):
+            h += f"<p><b>({i})</b></p>"
+            h += f'<p><img src="data:image/png;base64,{b64}" style="max-width:800px;border:1px solid #ddd;border-radius:4px;" /></p>'
     if p.get("dependencies"):
         h += "<h3>🔗 Dependencias</h3><ul>"
         for d in p["dependencies"]:
@@ -246,12 +253,15 @@ def generate_pbis(module, feature, description, context, images):
 # ========== RENDER PBI CARD ==========
 
 def render_pbi_card(pbi, idx, total):
-    figma_urls = []
+    figma_b64 = []
     figma_link = st.session_state.get("figma_url", None)
     if "figma_images" in st.session_state:
-        figma_urls = [img.get("url", "") for img in st.session_state["figma_images"]]
+        figma_b64 = [img.get("data", "") for img in st.session_state["figma_images"]]
+    # Also include uploaded files if stored
+    if "uploaded_b64" in st.session_state:
+        figma_b64.extend(st.session_state["uploaded_b64"])
 
-    html_content = pbi_to_html(pbi, figma_urls, figma_link)
+    html_content = pbi_to_html(pbi, figma_b64, figma_link)
 
     # Buttons row
     col_copy, col_push = st.columns([1, 1])
@@ -329,7 +339,7 @@ def render_pbi_card(pbi, idx, total):
                                 iteration_path=iteration if iteration.strip() else None,
                                 area_path=area if area.strip() else None,
                                 parent_id=parent_id,
-                                figma_urls=figma_urls,
+                                figma_b64=figma_b64,
                                 figma_link=figma_link,
                                 existing_id=existing_id
                             )
