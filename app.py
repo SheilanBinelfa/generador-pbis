@@ -425,227 +425,176 @@ def render_pbi_card(pbi, idx, total):
 # ========== VOICE COMPONENT ==========
 
 def build_voice_component(textarea_key: str) -> str:
-    """
-    Returns an HTML string for a voice dictation widget.
-    When the user clicks '⬆️ Añadir al campo', it injects the dictated text
-    directly into the Streamlit textarea by finding it in the parent document
-    via the aria-label or data-testid, and firing native React input events.
-    
-    The textarea_key corresponds to the st.text_area key= parameter,
-    which Streamlit uses to set the aria-label on the <textarea> element.
-    """
-    return f"""
-<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:4px 0;">
+    return """
+<div id="vc_wrap" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:4px 0;">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        
-        <button id="micBtn" onclick="toggleRecording()" style="
+        <button id="vc_micBtn" style="
             background:#f1f5f9;color:#64748b;border:1px solid #d1d5db;
             border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:500;
             display:inline-flex;align-items:center;gap:6px;
         ">
-            <span id="micIcon">🎤</span>
-            <span id="micText">Dictar con voz</span>
+            <span id="vc_micIcon">🎤</span>
+            <span id="vc_micText">Dictar con voz</span>
         </button>
-        
-        <span id="micStatus" style="font-size:12px;color:#ef4444;display:none;">🔴 Grabando...</span>
+        <span id="vc_status" style="font-size:12px;color:#ef4444;display:none;">🔴 Grabando...</span>
     </div>
 
-    <!-- Live dictation preview -->
-    <div id="dictPreview" style="
-        display:none;
-        background:#fefce8;border:1px solid #fde68a;border-radius:8px;
-        padding:10px 14px;margin-top:8px;font-size:13px;color:#78350f;line-height:1.6;
-    ">
-        <span style="font-size:11px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;">
-            Dictando...
-        </span><br>
-        <span id="dictFinal" style="color:#1c1917;"></span><span id="dictInterim" style="color:#a16207;font-style:italic;"></span>
+    <div id="vc_preview" style="display:none;background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-top:8px;font-size:13px;color:#78350f;line-height:1.6;">
+        <span style="font-size:11px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;">Dictando...</span><br>
+        <span id="vc_final" style="color:#1c1917;"></span><span id="vc_interim" style="color:#a16207;font-style:italic;"></span>
     </div>
 
-    <!-- Action buttons after stopping -->
-    <div id="actionRow" style="display:none;margin-top:8px;">
+    <div id="vc_actions" style="display:none;margin-top:8px;">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button id="useBtn" onclick="useText()" style="
-                background:#10b981;color:#fff;border:none;border-radius:8px;
-                padding:7px 16px;cursor:pointer;font-size:13px;font-weight:600;
-            ">⬆️ Añadir al campo de descripción</button>
-            <button onclick="clearAll()" style="
-                background:#fff;color:#64748b;border:1px solid #d1d5db;border-radius:8px;
-                padding:7px 12px;cursor:pointer;font-size:13px;
-            ">🗑️ Descartar</button>
-            <span id="doneMsg" style="font-size:12px;color:#10b981;display:none;">✓ Texto añadido</span>
+            <button id="vc_useBtn" style="background:#10b981;color:#fff;border:none;border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px;font-weight:600;">
+                ⬆️ Añadir al campo de descripción
+            </button>
+            <button id="vc_clearBtn" style="background:#fff;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px;">
+                🗑️ Descartar
+            </button>
+            <span id="vc_done" style="font-size:12px;color:#10b981;display:none;">✓ Texto añadido</span>
         </div>
     </div>
 </div>
 
 <script>
-(function() {{
-    let recognition = null;
-    let isRecording = false;
-    let finalText = "";
-    const TEXTAREA_KEY = "{textarea_key}";
+var vc_recognition = null;
+var vc_running = false;
+var vc_text = "";
 
-    function toggleRecording() {{
-        if (isRecording) stopRecording();
-        else startRecording();
-    }}
-    window.toggleRecording = toggleRecording;
+function vc_el(id) { return document.getElementById(id); }
 
-    function startRecording() {{
-        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SR) {{ alert("Usa Chrome o Edge para el dictado por voz."); return; }}
+function vc_setMic(on) {
+    vc_el("vc_micIcon").textContent = on ? "⏹" : "🎤";
+    vc_el("vc_micText").textContent = on ? "Parar" : "Dictar con voz";
+    var btn = vc_el("vc_micBtn");
+    btn.style.background = on ? "#ef4444" : "#f1f5f9";
+    btn.style.color = on ? "#fff" : "#64748b";
+    btn.style.borderColor = on ? "#ef4444" : "#d1d5db";
+}
 
-        finalText = "";
-        recognition = new SR();
-        recognition.lang = "es-ES";
-        recognition.continuous = true;
-        recognition.interimResults = true;
+function vc_showActions() {
+    vc_el("vc_interim").textContent = "";
+    vc_el("vc_status").style.display = "none";
+    if (vc_text.trim()) {
+        vc_el("vc_actions").style.display = "block";
+    }
+}
 
-        recognition.onresult = (e) => {{
-            let interim = "";
-            for (let i = e.resultIndex; i < e.results.length; i++) {{
-                const t = e.results[i][0].transcript;
-                if (e.results[i].isFinal) finalText += t + " ";
+function vc_toggle() {
+    if (vc_running) {
+        // STOP
+        vc_running = false;
+        vc_setMic(false);
+        if (vc_recognition) {
+            vc_recognition.onend = null;  // prevent any further callbacks
+            vc_recognition.onerror = null;
+            try { vc_recognition.stop(); } catch(e) {}
+            vc_recognition = null;
+        }
+        vc_showActions();
+    } else {
+        // START
+        var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) { alert("Usa Chrome o Edge para el dictado por voz."); return; }
+        vc_text = "";
+        vc_el("vc_final").textContent = "";
+        vc_el("vc_interim").textContent = "";
+        vc_el("vc_actions").style.display = "none";
+        vc_el("vc_done").style.display = "none";
+        vc_el("vc_useBtn").style.display = "inline-block";
+
+        vc_recognition = new SR();
+        vc_recognition.lang = "es-ES";
+        vc_recognition.continuous = true;
+        vc_recognition.interimResults = true;
+
+        vc_recognition.onresult = function(e) {
+            var interim = "";
+            for (var i = e.resultIndex; i < e.results.length; i++) {
+                var t = e.results[i][0].transcript;
+                if (e.results[i].isFinal) vc_text += t + " ";
                 else interim = t;
-            }}
-            document.getElementById("dictFinal").textContent = finalText;
-            document.getElementById("dictInterim").textContent = interim;
-        }};
+            }
+            vc_el("vc_final").textContent = vc_text;
+            vc_el("vc_interim").textContent = interim;
+        };
 
-        recognition.onerror = () => {{
-            isRecording = false;
-            setMicUI(false);
-            document.getElementById("micStatus").style.display = "none";
-        }};
-        recognition.onend = () => {{
-            // Only restart if still supposed to be recording
-            if (isRecording) {{
-                try {{ recognition.start(); }} 
-                catch(e) {{
-                    isRecording = false;
-                    showStopUI();
-                }}
-            }} else {{
-                // Naturally ended after stop() was called — show the action buttons
-                showStopUI();
-            }}
-        }};
+        vc_recognition.onend = function() {
+            if (vc_running) {
+                try { vc_recognition.start(); } catch(e) { vc_running = false; vc_setMic(false); vc_showActions(); }
+            }
+        };
 
-        recognition.start();
-        isRecording = true;
-        document.getElementById("dictPreview").style.display = "block";
-        document.getElementById("micStatus").style.display = "inline";
-        setMicUI(true);
-    }}
+        vc_recognition.onerror = function(e) {
+            if (e.error !== "no-speech") {
+                vc_running = false;
+                vc_setMic(false);
+                vc_showActions();
+            }
+        };
 
-    function stopRecording() {{
-        isRecording = false;
-        document.getElementById("dictInterim").textContent = "";
-        setMicUI(false);
-        document.getElementById("micStatus").style.display = "none";
-        if (recognition) {{
-            try {{ recognition.stop(); }} catch(e) {{}}
-            recognition = null;
-        }}
-        // Show UI immediately — don't wait for onend
-        showStopUI();
-    }}
+        vc_recognition.start();
+        vc_running = true;
+        vc_el("vc_preview").style.display = "block";
+        vc_el("vc_status").style.display = "inline";
+        vc_setMic(true);
+    }
+}
 
-    function showStopUI() {{
-        if (finalText.trim()) {{
-            document.getElementById("actionRow").style.display = "block";
-        }}
-    }}
-
-    function useText() {{
-        if (!finalText.trim()) return;
-        const text = finalText.trim();
-        
-        // Find the Streamlit textarea by its label (aria-label matches the key)
-        // Streamlit renders textareas with aria-label equal to the label text
-        // We search in the top-level document (parent of this iframe)
-        let parentDoc;
-        try {{ parentDoc = window.parent.document; }} catch(e) {{ copyFallback(text); return; }}
-        
-        // Try multiple selectors to find our textarea
-        let ta = null;
-        
-        // Method 1: find by aria-label matching the key
-        const allTextareas = parentDoc.querySelectorAll("textarea");
-        for (const t of allTextareas) {{
-            if (t.getAttribute("aria-label") === TEXTAREA_KEY || 
-                t.placeholder && t.placeholder.includes("Desde algo breve")) {{
-                ta = t;
+function vc_use() {
+    var text = vc_text.trim();
+    if (!text) return;
+    var injected = false;
+    try {
+        var parentDoc = window.parent.document;
+        var textareas = parentDoc.querySelectorAll("textarea");
+        for (var i = 0; i < textareas.length; i++) {
+            var ta = textareas[i];
+            if (ta.placeholder && ta.placeholder.indexOf("Desde algo breve") !== -1) {
+                var setter = Object.getOwnPropertyDescriptor(window.parent.HTMLTextAreaElement.prototype, "value").set;
+                var newVal = ta.value ? ta.value + " " + text : text;
+                setter.call(ta, newVal);
+                ta.dispatchEvent(new window.parent.Event("input", { bubbles: true }));
+                ta.dispatchEvent(new window.parent.Event("change", { bubbles: true }));
+                ta.style.borderColor = "#10b981";
+                setTimeout(function() { ta.style.borderColor = ""; }, 1500);
+                injected = true;
                 break;
-            }}
-        }}
+            }
+        }
+    } catch(e) {}
 
-        if (ta) {{
-            // Inject text using React's synthetic event system
-            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                window.parent.HTMLTextAreaElement.prototype, 'value'
-            ).set;
-            
-            const currentVal = ta.value;
-            const newVal = currentVal ? currentVal + " " + text : text;
-            nativeInputValueSetter.call(ta, newVal);
-            
-            // Fire React's change event
-            ta.dispatchEvent(new window.parent.Event('input', {{ bubbles: true }}));
-            ta.dispatchEvent(new window.parent.Event('change', {{ bubbles: true }}));
-            
-            // Visual feedback on the textarea
-            ta.style.transition = "border-color .3s, box-shadow .3s";
-            ta.style.borderColor = "#10b981";
-            ta.style.boxShadow = "0 0 0 2px rgba(16,185,129,0.2)";
-            setTimeout(() => {{
-                ta.style.borderColor = "";
-                ta.style.boxShadow = "";
-            }}, 1500);
-            
-            showDone();
-        }} else {{
-            // Fallback: copy to clipboard
-            copyFallback(text);
-        }}
-    }}
-    window.useText = useText;
+    if (!injected) {
+        navigator.clipboard.writeText(text).then(function() {
+            vc_el("vc_useBtn").textContent = "📋 Copiado — pégalo arriba";
+            vc_el("vc_useBtn").style.background = "#6366f1";
+        }).catch(function() {
+            vc_el("vc_useBtn").textContent = "❌ Copia el texto manualmente";
+        });
+        return;
+    }
 
-    function copyFallback(text) {{
-        navigator.clipboard.writeText(text).then(() => {{
-            document.getElementById("useBtn").textContent = "📋 Copiado — pégalo en el campo de arriba";
-            document.getElementById("useBtn").style.background = "#6366f1";
-        }}).catch(() => {{
-            document.getElementById("useBtn").textContent = "❌ No se pudo — copia el texto manualmente";
-        }});
-    }}
+    vc_el("vc_useBtn").style.display = "none";
+    vc_el("vc_done").style.display = "inline";
+    setTimeout(function() { vc_clear(); }, 2000);
+}
 
-    function showDone() {{
-        document.getElementById("useBtn").style.display = "none";
-        document.getElementById("doneMsg").style.display = "inline";
-        setTimeout(() => clearAll(), 2000);
-    }}
+function vc_clear() {
+    vc_text = "";
+    vc_el("vc_preview").style.display = "none";
+    vc_el("vc_final").textContent = "";
+    vc_el("vc_interim").textContent = "";
+    vc_el("vc_actions").style.display = "none";
+    vc_el("vc_useBtn").style.display = "inline-block";
+    vc_el("vc_useBtn").textContent = "⬆️ Añadir al campo de descripción";
+    vc_el("vc_useBtn").style.background = "#10b981";
+    vc_el("vc_done").style.display = "none";
+}
 
-    function clearAll() {{
-        finalText = "";
-        document.getElementById("dictPreview").style.display = "none";
-        document.getElementById("dictFinal").textContent = "";
-        document.getElementById("dictInterim").textContent = "";
-        document.getElementById("actionRow").style.display = "none";
-        document.getElementById("useBtn").style.display = "inline-block";
-        document.getElementById("doneMsg").style.display = "none";
-    }}
-    window.clearAll = clearAll;
-
-    function setMicUI(recording) {{
-        const btn = document.getElementById("micBtn");
-        document.getElementById("micIcon").textContent = recording ? "⏹" : "🎤";
-        document.getElementById("micText").textContent = recording ? "Parar" : "Dictar con voz";
-        btn.style.background = recording ? "#ef4444" : "#f1f5f9";
-        btn.style.color = recording ? "#fff" : "#64748b";
-        btn.style.borderColor = recording ? "#ef4444" : "#d1d5db";
-    }}
-}})();
+document.getElementById("vc_micBtn").addEventListener("click", vc_toggle);
+document.getElementById("vc_useBtn").addEventListener("click", vc_use);
+document.getElementById("vc_clearBtn").addEventListener("click", vc_clear);
 </script>
 """
 
