@@ -453,130 +453,38 @@ with st.container(border=True):
         feature = st.text_input("Feature", placeholder="Ej: Políticas de V&A")
 
     # Description textarea — the voice component will inject text into this
-    # Voice bridge: query param ?voice=... sent by JS → pre-fills textarea
-    qp = st.query_params
-    voice_from_url = qp.get("voice", "")
-    if voice_from_url:
-        existing = st.session_state.get("desc_voice_val", "")
-        st.session_state["desc_voice_val"] = (existing + " " + voice_from_url).strip()
-        qp.clear()
+    # Voice dictation using streamlit-mic-recorder (native Streamlit component)
+    from streamlit_mic_recorder import speech_to_text
 
-    desc_default = st.session_state.get("desc_voice_val", "")
+    if "desc_voice_val" not in st.session_state:
+        st.session_state["desc_voice_val"] = ""
 
-    description = st.text_area(
-        "Descripción funcional *",
-        value=desc_default,
-        placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
-        height=130,
-        key="desc_input"
-    )
-    st.session_state["desc_voice_val"] = description
+    col_desc, col_mic = st.columns([10, 1])
+    with col_desc:
+        description = st.text_area(
+            "Descripción funcional *",
+            value=st.session_state["desc_voice_val"],
+            placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
+            height=130,
+            key="desc_input"
+        )
+        st.session_state["desc_voice_val"] = description
 
-    # Voice dictation component
-    voice_html = """
-<div id="vc" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:4px 0;">
-  <div id="vc_row" style="min-height:36px;"></div>
-  <div id="vc_preview" style="display:none;background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-top:8px;font-size:13px;color:#78350f;line-height:1.6;">
-    <b style="font-size:11px;color:#92400e;text-transform:uppercase;letter-spacing:.5px;">Dictando...</b><br>
-    <span id="vc_final" style="color:#1c1917;"></span><span id="vc_interim" style="color:#a16207;font-style:italic;"></span>
-  </div>
-  <div id="vc_actions" style="display:none;margin-top:8px;">
-    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-      <button id="vc_use" style="background:#10b981;color:#fff;border:none;border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px;font-weight:600;">⬆️ Añadir a la descripción</button>
-      <button id="vc_discard" style="background:#fff;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px;">🗑️ Descartar</button>
-    </div>
-  </div>
-</div>
-<script>
-(function() {
-  var recog = null, going = false, captured = "";
+    with col_mic:
+        st.markdown("<div style='padding-top:28px'></div>", unsafe_allow_html=True)
+        voice_text = speech_to_text(
+            start_prompt="🎤",
+            stop_prompt="⏹",
+            language="es",
+            use_container_width=True,
+            key="voice_recorder"
+        )
+        if voice_text:
+            current = st.session_state.get("desc_voice_val", "")
+            st.session_state["desc_voice_val"] = (current + " " + voice_text).strip()
+            st.rerun()
 
-  var btn = document.createElement("button");
-  btn.innerHTML = '<span id="vc_icon">🎤</span>&nbsp;<span id="vc_lbl">Dictar con voz</span>';
-  btn.style.cssText = "background:#f1f5f9;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;";
-  var dot = document.createElement("span");
-  dot.textContent = "  🔴 Grabando...";
-  dot.style.cssText = "font-size:12px;color:#ef4444;display:none;margin-left:6px;";
-  var row = document.getElementById("vc_row");
-  row.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;";
-  row.appendChild(btn);
-  row.appendChild(dot);
-
-  function g(id) { return document.getElementById(id); }
-
-  function setUI(on) {
-    g("vc_icon").textContent = on ? "⏹" : "🎤";
-    g("vc_lbl").textContent  = on ? "Parar" : "Dictar con voz";
-    btn.style.background     = on ? "#ef4444" : "#f1f5f9";
-    btn.style.color          = on ? "#fff"    : "#64748b";
-    btn.style.borderColor    = on ? "#ef4444" : "#d1d5db";
-    dot.style.display        = on ? "inline"  : "none";
-  }
-
-  btn.addEventListener("click", function() {
-    if (going) {
-      going = false;
-      if (recog) {
-        recog.onend = function(){};
-        recog.onerror = function(){};
-        recog.onresult = function(){};
-        try { recog.abort(); } catch(e) {}
-        recog = null;
-      }
-      g("vc_interim").textContent = "";
-      setUI(false);
-      if (captured.trim()) g("vc_actions").style.display = "block";
-    } else {
-      var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-      if (!SR) { alert("Usa Chrome o Edge para dictar."); return; }
-      captured = "";
-      g("vc_final").textContent = "";
-      g("vc_interim").textContent = "";
-      g("vc_actions").style.display = "none";
-      g("vc_preview").style.display = "block";
-      recog = new SR();
-      recog.lang = "es-ES";
-      recog.continuous = true;
-      recog.interimResults = true;
-      recog.onresult = function(e) {
-        var interim = "";
-        for (var i = e.resultIndex; i < e.results.length; i++) {
-          if (e.results[i].isFinal) captured += e.results[i][0].transcript + " ";
-          else interim = e.results[i][0].transcript;
-        }
-        g("vc_final").textContent = captured;
-        g("vc_interim").textContent = interim;
-      };
-      recog.onend = function() { if (going) { try { recog.start(); } catch(e) {} } };
-      recog.onerror = function(ev) {
-        if (ev.error !== "no-speech") { going = false; setUI(false); if (captured.trim()) g("vc_actions").style.display = "block"; }
-      };
-      recog.start();
-      going = true;
-      setUI(true);
-    }
-  });
-
-  g("vc_use").addEventListener("click", function() {
-    var t = captured.trim();
-    if (!t) return;
-    var base = window.parent.location.href.split("?")[0];
-    window.parent.location.href = base + "?voice=" + encodeURIComponent(t);
-  });
-
-  g("vc_discard").addEventListener("click", function() {
-    captured = "";
-    g("vc_preview").style.display = "none";
-    g("vc_final").textContent = "";
-    g("vc_interim").textContent = "";
-    g("vc_actions").style.display = "none";
-  });
-})();
-</script>
-"""
-    st.components.v1.html(voice_html, height=110, scrolling=False)
-
-    st.markdown("---")
+        st.markdown("---")
 
     context = st.text_area(
         "Contexto técnico (opcional)",
