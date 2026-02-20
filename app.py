@@ -426,175 +426,183 @@ def render_pbi_card(pbi, idx, total):
 
 def build_voice_component(textarea_key: str) -> str:
     return """
-<div id="vc_wrap" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:4px 0;">
+<style>
+.vc-mic-btn {
+    background:#f1f5f9;color:#64748b;border:1px solid #d1d5db;
+    border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:500;
+    display:inline-flex;align-items:center;gap:6px;
+}
+.vc-preview {
+    display:none;background:#fefce8;border:1px solid #fde68a;border-radius:8px;
+    padding:10px 14px;margin-top:8px;font-size:13px;color:#78350f;line-height:1.6;
+}
+.vc-actions { display:none;margin-top:8px; }
+.vc-actions-inner { display:flex;gap:8px;align-items:center;flex-wrap:wrap; }
+.vc-use-btn { background:#10b981;color:#fff;border:none;border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px;font-weight:600; }
+.vc-clear-btn { background:#fff;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px; }
+</style>
+
+<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:4px 0;">
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-        <button id="vc_micBtn" style="
-            background:#f1f5f9;color:#64748b;border:1px solid #d1d5db;
-            border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:500;
-            display:inline-flex;align-items:center;gap:6px;
-        ">
-            <span id="vc_micIcon">🎤</span>
-            <span id="vc_micText">Dictar con voz</span>
+        <button class="vc-mic-btn" id="vc_btn" onclick="vcToggle()">
+            <span id="vc_icon">🎤</span>
+            <span id="vc_label">Dictar con voz</span>
         </button>
         <span id="vc_status" style="font-size:12px;color:#ef4444;display:none;">🔴 Grabando...</span>
     </div>
-
-    <div id="vc_preview" style="display:none;background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-top:8px;font-size:13px;color:#78350f;line-height:1.6;">
+    <div class="vc-preview" id="vc_preview">
         <span style="font-size:11px;font-weight:700;color:#92400e;text-transform:uppercase;letter-spacing:.5px;">Dictando...</span><br>
         <span id="vc_final" style="color:#1c1917;"></span><span id="vc_interim" style="color:#a16207;font-style:italic;"></span>
     </div>
-
-    <div id="vc_actions" style="display:none;margin-top:8px;">
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button id="vc_useBtn" style="background:#10b981;color:#fff;border:none;border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px;font-weight:600;">
-                ⬆️ Añadir al campo de descripción
-            </button>
-            <button id="vc_clearBtn" style="background:#fff;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px;">
-                🗑️ Descartar
-            </button>
+    <div class="vc-actions" id="vc_actions">
+        <div class="vc-actions-inner">
+            <button class="vc-use-btn" id="vc_use" onclick="vcUse()">⬆️ Añadir al campo de descripción</button>
+            <button class="vc-clear-btn" onclick="vcClear()">🗑️ Descartar</button>
             <span id="vc_done" style="font-size:12px;color:#10b981;display:none;">✓ Texto añadido</span>
         </div>
     </div>
 </div>
 
 <script>
-var vc_recognition = null;
-var vc_running = false;
+var vc_recog = null;
+var vc_going = false;
 var vc_text = "";
 
-function vc_el(id) { return document.getElementById(id); }
-
-function vc_setMic(on) {
-    vc_el("vc_micIcon").textContent = on ? "⏹" : "🎤";
-    vc_el("vc_micText").textContent = on ? "Parar" : "Dictar con voz";
-    var btn = vc_el("vc_micBtn");
-    btn.style.background = on ? "#ef4444" : "#f1f5f9";
-    btn.style.color = on ? "#fff" : "#64748b";
-    btn.style.borderColor = on ? "#ef4444" : "#d1d5db";
-}
-
-function vc_showActions() {
-    vc_el("vc_interim").textContent = "";
-    vc_el("vc_status").style.display = "none";
-    if (vc_text.trim()) {
-        vc_el("vc_actions").style.display = "block";
-    }
-}
-
-function vc_toggle() {
-    if (vc_running) {
-        // STOP
-        vc_running = false;
-        vc_setMic(false);
-        if (vc_recognition) {
-            vc_recognition.onend = null;  // prevent any further callbacks
-            vc_recognition.onerror = null;
-            try { vc_recognition.stop(); } catch(e) {}
-            vc_recognition = null;
-        }
-        vc_showActions();
+function vcToggle() {
+    if (vc_going) {
+        vcStop();
     } else {
-        // START
-        var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SR) { alert("Usa Chrome o Edge para el dictado por voz."); return; }
-        vc_text = "";
-        vc_el("vc_final").textContent = "";
-        vc_el("vc_interim").textContent = "";
-        vc_el("vc_actions").style.display = "none";
-        vc_el("vc_done").style.display = "none";
-        vc_el("vc_useBtn").style.display = "inline-block";
-
-        vc_recognition = new SR();
-        vc_recognition.lang = "es-ES";
-        vc_recognition.continuous = true;
-        vc_recognition.interimResults = true;
-
-        vc_recognition.onresult = function(e) {
-            var interim = "";
-            for (var i = e.resultIndex; i < e.results.length; i++) {
-                var t = e.results[i][0].transcript;
-                if (e.results[i].isFinal) vc_text += t + " ";
-                else interim = t;
-            }
-            vc_el("vc_final").textContent = vc_text;
-            vc_el("vc_interim").textContent = interim;
-        };
-
-        vc_recognition.onend = function() {
-            if (vc_running) {
-                try { vc_recognition.start(); } catch(e) { vc_running = false; vc_setMic(false); vc_showActions(); }
-            }
-        };
-
-        vc_recognition.onerror = function(e) {
-            if (e.error !== "no-speech") {
-                vc_running = false;
-                vc_setMic(false);
-                vc_showActions();
-            }
-        };
-
-        vc_recognition.start();
-        vc_running = true;
-        vc_el("vc_preview").style.display = "block";
-        vc_el("vc_status").style.display = "inline";
-        vc_setMic(true);
+        vcStart();
     }
 }
 
-function vc_use() {
+function vcStart() {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert("Usa Chrome o Edge."); return; }
+
+    vc_text = "";
+    document.getElementById("vc_final").textContent = "";
+    document.getElementById("vc_interim").textContent = "";
+    document.getElementById("vc_actions").style.display = "none";
+    document.getElementById("vc_done").style.display = "none";
+    document.getElementById("vc_use").textContent = "⬆️ Añadir al campo de descripción";
+    document.getElementById("vc_use").style.background = "#10b981";
+    document.getElementById("vc_use").style.display = "inline-block";
+
+    vc_recog = new SR();
+    vc_recog.lang = "es-ES";
+    vc_recog.continuous = true;
+    vc_recog.interimResults = true;
+
+    vc_recog.onresult = function(e) {
+        var interim = "";
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+            if (e.results[i].isFinal) vc_text += e.results[i][0].transcript + " ";
+            else interim = e.results[i][0].transcript;
+        }
+        document.getElementById("vc_final").textContent = vc_text;
+        document.getElementById("vc_interim").textContent = interim;
+    };
+
+    vc_recog.onend = function() {
+        if (vc_going) {
+            try { vc_recog.start(); } catch(e) {}
+        }
+    };
+
+    vc_recog.onerror = function(err) {
+        if (err.error !== "no-speech") {
+            vc_going = false;
+            vcSetUI(false);
+            vcShowActions();
+        }
+    };
+
+    vc_recog.start();
+    vc_going = true;
+    document.getElementById("vc_preview").style.display = "block";
+    document.getElementById("vc_status").style.display = "inline";
+    vcSetUI(true);
+}
+
+function vcStop() {
+    vc_going = false;
+
+    // Neutralise callbacks BEFORE calling stop()
+    if (vc_recog) {
+        vc_recog.onend = function() {};
+        vc_recog.onerror = function() {};
+        vc_recog.onresult = function() {};
+        try { vc_recog.abort(); } catch(e) {}
+        vc_recog = null;
+    }
+
+    document.getElementById("vc_interim").textContent = "";
+    document.getElementById("vc_status").style.display = "none";
+    vcSetUI(false);
+    vcShowActions();
+}
+
+function vcShowActions() {
+    if (vc_text.trim().length > 0) {
+        document.getElementById("vc_actions").style.display = "block";
+    }
+}
+
+function vcSetUI(on) {
+    document.getElementById("vc_icon").textContent  = on ? "⏹" : "🎤";
+    document.getElementById("vc_label").textContent = on ? "Parar" : "Dictar con voz";
+    var btn = document.getElementById("vc_btn");
+    btn.style.background   = on ? "#ef4444" : "#f1f5f9";
+    btn.style.color        = on ? "#fff"    : "#64748b";
+    btn.style.borderColor  = on ? "#ef4444" : "#d1d5db";
+}
+
+function vcUse() {
     var text = vc_text.trim();
     if (!text) return;
-    var injected = false;
+    var ok = false;
     try {
-        var parentDoc = window.parent.document;
-        var textareas = parentDoc.querySelectorAll("textarea");
-        for (var i = 0; i < textareas.length; i++) {
-            var ta = textareas[i];
-            if (ta.placeholder && ta.placeholder.indexOf("Desde algo breve") !== -1) {
+        var pDoc = window.parent.document;
+        var tas = pDoc.querySelectorAll("textarea");
+        for (var i = 0; i < tas.length; i++) {
+            if (tas[i].placeholder && tas[i].placeholder.indexOf("Desde algo breve") !== -1) {
                 var setter = Object.getOwnPropertyDescriptor(window.parent.HTMLTextAreaElement.prototype, "value").set;
-                var newVal = ta.value ? ta.value + " " + text : text;
-                setter.call(ta, newVal);
-                ta.dispatchEvent(new window.parent.Event("input", { bubbles: true }));
-                ta.dispatchEvent(new window.parent.Event("change", { bubbles: true }));
-                ta.style.borderColor = "#10b981";
-                setTimeout(function() { ta.style.borderColor = ""; }, 1500);
-                injected = true;
+                setter.call(tas[i], tas[i].value ? tas[i].value + " " + text : text);
+                tas[i].dispatchEvent(new window.parent.Event("input",  {bubbles:true}));
+                tas[i].dispatchEvent(new window.parent.Event("change", {bubbles:true}));
+                tas[i].style.borderColor = "#10b981";
+                setTimeout(function(){ tas[i].style.borderColor = ""; }, 1500);
+                ok = true;
                 break;
             }
         }
     } catch(e) {}
 
-    if (!injected) {
+    if (!ok) {
         navigator.clipboard.writeText(text).then(function() {
-            vc_el("vc_useBtn").textContent = "📋 Copiado — pégalo arriba";
-            vc_el("vc_useBtn").style.background = "#6366f1";
-        }).catch(function() {
-            vc_el("vc_useBtn").textContent = "❌ Copia el texto manualmente";
+            document.getElementById("vc_use").textContent = "📋 Copiado — pégalo arriba";
+            document.getElementById("vc_use").style.background = "#6366f1";
         });
         return;
     }
 
-    vc_el("vc_useBtn").style.display = "none";
-    vc_el("vc_done").style.display = "inline";
-    setTimeout(function() { vc_clear(); }, 2000);
+    document.getElementById("vc_use").style.display = "none";
+    document.getElementById("vc_done").style.display = "inline";
+    setTimeout(function() { vcClear(); }, 2000);
 }
 
-function vc_clear() {
+function vcClear() {
     vc_text = "";
-    vc_el("vc_preview").style.display = "none";
-    vc_el("vc_final").textContent = "";
-    vc_el("vc_interim").textContent = "";
-    vc_el("vc_actions").style.display = "none";
-    vc_el("vc_useBtn").style.display = "inline-block";
-    vc_el("vc_useBtn").textContent = "⬆️ Añadir al campo de descripción";
-    vc_el("vc_useBtn").style.background = "#10b981";
-    vc_el("vc_done").style.display = "none";
+    document.getElementById("vc_preview").style.display = "none";
+    document.getElementById("vc_final").textContent = "";
+    document.getElementById("vc_interim").textContent = "";
+    document.getElementById("vc_actions").style.display = "none";
+    document.getElementById("vc_use").style.display = "inline-block";
+    document.getElementById("vc_use").textContent = "⬆️ Añadir al campo de descripción";
+    document.getElementById("vc_use").style.background = "#10b981";
+    document.getElementById("vc_done").style.display = "none";
 }
-
-document.getElementById("vc_micBtn").addEventListener("click", vc_toggle);
-document.getElementById("vc_useBtn").addEventListener("click", vc_use);
-document.getElementById("vc_clearBtn").addEventListener("click", vc_clear);
 </script>
 """
 
