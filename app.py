@@ -457,16 +457,15 @@ with st.container(border=True):
     from streamlit_mic_recorder import speech_to_text
 
     # Textarea principal
-    # Apply voice prefill if pending (can't set widget key directly)
-    if "_desc_prefill" in st.session_state:
-        st.session_state["desc_input"] = st.session_state.pop("_desc_prefill")
-
     description = st.text_area(
         "Descripción funcional *",
+        value=st.session_state.get("desc_value", ""),
         placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
         height=130,
         key="desc_input"
     )
+    # Keep desc_value in sync with manual edits
+    st.session_state["desc_value"] = description
 
     # Voice dictation
     with st.expander("🎤 Dictar con voz"):
@@ -486,9 +485,9 @@ with st.container(border=True):
             col_send, col_clear = st.columns([2, 1])
             with col_send:
                 if st.button("⬆️ Enviar a descripción", key="send_voice", use_container_width=True, type="primary"):
-                    current = st.session_state.get("desc_input", "")
+                    current = st.session_state.get("desc_value", "")
                     voice = st.session_state["last_voice_text"]
-                    st.session_state["desc_input"] = (current + " " + voice).strip()
+                    st.session_state["desc_value"] = (current + " " + voice).strip()
                     del st.session_state["last_voice_text"]
                     st.rerun()
             with col_clear:
