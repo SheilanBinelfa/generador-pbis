@@ -456,15 +456,15 @@ with st.container(border=True):
     # Voice dictation using streamlit-mic-recorder (native Streamlit component)
     from streamlit_mic_recorder import speech_to_text
 
-    # Textarea principal
+    # Textarea principal — usa desc_value como estado, sin key= para evitar conflictos
+    if "desc_value" not in st.session_state:
+        st.session_state["desc_value"] = ""
     description = st.text_area(
         "Descripción funcional *",
-        value=st.session_state.get("desc_value", ""),
+        value=st.session_state["desc_value"],
         placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
-        height=130,
-        key="desc_input"
+        height=130
     )
-    # Keep desc_value in sync with manual edits
     st.session_state["desc_value"] = description
 
     # Voice dictation
