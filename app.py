@@ -463,16 +463,18 @@ def build_voice_component(textarea_key: str) -> str:
     </div>
 
     <!-- Action buttons after stopping -->
-    <div id="actionRow" style="display:none;margin-top:8px;gap:8px;align-items:center;flex-wrap:wrap;">
-        <button id="useBtn" onclick="useText()" style="
-            background:#10b981;color:#fff;border:none;border-radius:8px;
-            padding:7px 16px;cursor:pointer;font-size:13px;font-weight:600;
-        ">⬆️ Añadir al campo de descripción</button>
-        <button onclick="clearAll()" style="
-            background:#fff;color:#64748b;border:1px solid #d1d5db;border-radius:8px;
-            padding:7px 12px;cursor:pointer;font-size:13px;
-        ">🗑️ Descartar</button>
-        <span id="doneMsg" style="font-size:12px;color:#10b981;display:none;">✓ Texto añadido</span>
+    <div id="actionRow" style="display:none;margin-top:8px;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button id="useBtn" onclick="useText()" style="
+                background:#10b981;color:#fff;border:none;border-radius:8px;
+                padding:7px 16px;cursor:pointer;font-size:13px;font-weight:600;
+            ">⬆️ Añadir al campo de descripción</button>
+            <button onclick="clearAll()" style="
+                background:#fff;color:#64748b;border:1px solid #d1d5db;border-radius:8px;
+                padding:7px 12px;cursor:pointer;font-size:13px;
+            ">🗑️ Descartar</button>
+            <span id="doneMsg" style="font-size:12px;color:#10b981;display:none;">✓ Texto añadido</span>
+        </div>
     </div>
 </div>
 
@@ -530,7 +532,7 @@ def build_voice_component(textarea_key: str) -> str:
         document.getElementById("dictInterim").textContent = "";
         if (finalText.trim()) {{
             const row = document.getElementById("actionRow");
-            row.style.display = "flex";
+            row.style.display = "block";
         }}
     }}
 
