@@ -422,173 +422,6 @@ def render_pbi_card(pbi, idx, total):
             pbi["tech_notes"][i] = st.text_input(f"N{i+1}", n, key=f"tn_{idx}_{i}", label_visibility="collapsed")
 
 
-# ========== VOICE COMPONENT ==========
-
-def build_voice_component(textarea_key: str) -> str:
-    return """
-<div id="vc" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:4px 0;">
-  <div id="vc_row1" style="display:flex;align-items:center;gap:8px;"></div>
-  <div id="vc_preview" style="display:none;background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-top:8px;font-size:13px;color:#78350f;line-height:1.6;">
-    <b style="font-size:11px;color:#92400e;text-transform:uppercase;letter-spacing:.5px;">Dictando...</b><br>
-    <span id="vc_final" style="color:#1c1917;"></span><span id="vc_interim" style="color:#a16207;font-style:italic;"></span>
-  </div>
-  <div id="vc_actions" style="display:none;margin-top:8px;display:none;">
-    <button id="vc_use" style="background:#10b981;color:#fff;border:none;border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px;font-weight:600;margin-right:8px;">⬆️ Añadir al campo de descripción</button>
-    <button id="vc_clear" style="background:#fff;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px;">🗑️ Descartar</button>
-    <span id="vc_done" style="font-size:12px;color:#10b981;margin-left:8px;display:none;">✓ Texto añadido</span>
-  </div>
-</div>
-<script>
-(function() {
-  // Build mic button dynamically so script runs after element exists
-  var micBtn = document.createElement("button");
-  micBtn.id = "vc_btn";
-  micBtn.innerHTML = "<span id=\"vc_icon\">🎤</span> <span id=\"vc_lbl\">Dictar con voz</span>";
-  micBtn.style.cssText = "background:#f1f5f9;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;";
-
-  var statusEl = document.createElement("span");
-  statusEl.id = "vc_status";
-  statusEl.style.cssText = "font-size:12px;color:#ef4444;display:none;";
-  statusEl.textContent = "🔴 Grabando...";
-
-  document.getElementById("vc_row1").appendChild(micBtn);
-  document.getElementById("vc_row1").appendChild(statusEl);
-
-  var recog = null, going = false, text = "";
-
-  function g(id) { return document.getElementById(id); }
-
-  function setUI(on) {
-    g("vc_icon").textContent = on ? "⏹" : "🎤";
-    g("vc_lbl").textContent  = on ? "Parar" : "Dictar con voz";
-    micBtn.style.background  = on ? "#ef4444" : "#f1f5f9";
-    micBtn.style.color       = on ? "#fff" : "#64748b";
-    micBtn.style.borderColor = on ? "#ef4444" : "#d1d5db";
-    g("vc_status").style.display = on ? "inline" : "none";
-  }
-
-  function showActions() {
-    if (text.trim().length > 0) {
-      g("vc_actions").style.display = "block";
-    }
-  }
-
-  function doStop() {
-    going = false;
-    if (recog) {
-      recog.onend = function(){};
-      recog.onerror = function(){};
-      recog.onresult = function(){};
-      try { recog.abort(); } catch(e) {}
-      recog = null;
-    }
-    g("vc_interim").textContent = "";
-    setUI(false);
-    showActions();
-  }
-
-  function doStart() {
-    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert("Usa Chrome o Edge para dictar."); return; }
-
-    text = "";
-    g("vc_final").textContent = "";
-    g("vc_interim").textContent = "";
-    g("vc_actions").style.display = "none";
-    g("vc_done").style.display = "none";
-    g("vc_use").style.display = "inline-block";
-    g("vc_use").textContent = "⬆️ Añadir al campo de descripción";
-    g("vc_use").style.background = "#10b981";
-
-    recog = new SR();
-    recog.lang = "es-ES";
-    recog.continuous = true;
-    recog.interimResults = true;
-
-    recog.onresult = function(e) {
-      var interim = "";
-      for (var i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) text += e.results[i][0].transcript + " ";
-        else interim = e.results[i][0].transcript;
-      }
-      g("vc_final").textContent = text;
-      g("vc_interim").textContent = interim;
-    };
-
-    recog.onend = function() {
-      if (going) { try { recog.start(); } catch(e) { doStop(); } }
-    };
-
-    recog.onerror = function(ev) {
-      if (ev.error !== "no-speech") doStop();
-    };
-
-    recog.start();
-    going = true;
-    g("vc_preview").style.display = "block";
-    setUI(true);
-  }
-
-  micBtn.addEventListener("click", function() {
-    if (going) doStop(); else doStart();
-  });
-
-  g("vc_use").addEventListener("click", function() {
-    var t = text.trim();
-    if (!t) return;
-    var injected = false;
-    try {
-      var pDoc = window.parent.document;
-      var tas = pDoc.querySelectorAll("textarea");
-      for (var i = 0; i < tas.length; i++) {
-        if (tas[i].placeholder && tas[i].placeholder.indexOf("Desde algo breve") !== -1) {
-          var setter = Object.getOwnPropertyDescriptor(window.parent.HTMLTextAreaElement.prototype, "value").set;
-          setter.call(tas[i], tas[i].value ? tas[i].value + " " + t : t);
-          tas[i].dispatchEvent(new window.parent.Event("input",  {bubbles:true}));
-          tas[i].dispatchEvent(new window.parent.Event("change", {bubbles:true}));
-          tas[i].style.borderColor = "#10b981";
-          setTimeout(function() { tas[i].style.borderColor = ""; }, 1500);
-          injected = true;
-          break;
-        }
-      }
-    } catch(e) {}
-    if (!injected) {
-      navigator.clipboard.writeText(t).then(function() {
-        g("vc_use").textContent = "📋 Copiado — pégalo arriba";
-        g("vc_use").style.background = "#6366f1";
-      });
-      return;
-    }
-    g("vc_use").style.display = "none";
-    g("vc_done").style.display = "inline";
-    setTimeout(function() {
-      text = "";
-      g("vc_preview").style.display = "none";
-      g("vc_final").textContent = "";
-      g("vc_actions").style.display = "none";
-      g("vc_use").style.display = "inline-block";
-      g("vc_use").textContent = "⬆️ Añadir al campo de descripción";
-      g("vc_use").style.background = "#10b981";
-      g("vc_done").style.display = "none";
-    }, 2000);
-  });
-
-  g("vc_clear").addEventListener("click", function() {
-    text = "";
-    g("vc_preview").style.display = "none";
-    g("vc_final").textContent = "";
-    g("vc_interim").textContent = "";
-    g("vc_actions").style.display = "none";
-    g("vc_use").style.display = "inline-block";
-    g("vc_use").textContent = "⬆️ Añadir al campo de descripción";
-    g("vc_use").style.background = "#10b981";
-    g("vc_done").style.display = "none";
-  });
-
-})();
-</script>
-"""
 
 
 # ========== MAIN UI ==========
@@ -620,19 +453,128 @@ with st.container(border=True):
         feature = st.text_input("Feature", placeholder="Ej: Políticas de V&A")
 
     # Description textarea — the voice component will inject text into this
+    # Voice bridge: query param ?voice=... sent by JS → pre-fills textarea
+    qp = st.query_params
+    voice_from_url = qp.get("voice", "")
+    if voice_from_url:
+        existing = st.session_state.get("desc_voice_val", "")
+        st.session_state["desc_voice_val"] = (existing + " " + voice_from_url).strip()
+        qp.clear()
+
+    desc_default = st.session_state.get("desc_voice_val", "")
+
     description = st.text_area(
         "Descripción funcional *",
+        value=desc_default,
         placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
         height=130,
         key="desc_input"
     )
+    st.session_state["desc_voice_val"] = description
 
-    # Voice component — sits right below the textarea and injects text into it
-    st.components.v1.html(
-        build_voice_component("Descripción funcional *"),
-        height=100,
-        scrolling=False
-    )
+    # Voice dictation component
+    voice_html = """
+<div id="vc" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;padding:4px 0;">
+  <div id="vc_row" style="min-height:36px;"></div>
+  <div id="vc_preview" style="display:none;background:#fefce8;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-top:8px;font-size:13px;color:#78350f;line-height:1.6;">
+    <b style="font-size:11px;color:#92400e;text-transform:uppercase;letter-spacing:.5px;">Dictando...</b><br>
+    <span id="vc_final" style="color:#1c1917;"></span><span id="vc_interim" style="color:#a16207;font-style:italic;"></span>
+  </div>
+  <div id="vc_actions" style="display:none;margin-top:8px;">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <button id="vc_use" style="background:#10b981;color:#fff;border:none;border-radius:8px;padding:7px 16px;cursor:pointer;font-size:13px;font-weight:600;">⬆️ Añadir a la descripción</button>
+      <button id="vc_discard" style="background:#fff;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px;">🗑️ Descartar</button>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  var recog = null, going = false, captured = "";
+
+  var btn = document.createElement("button");
+  btn.innerHTML = '<span id="vc_icon">🎤</span>&nbsp;<span id="vc_lbl">Dictar con voz</span>';
+  btn.style.cssText = "background:#f1f5f9;color:#64748b;border:1px solid #d1d5db;border-radius:8px;padding:7px 14px;cursor:pointer;font-size:13px;font-weight:500;display:inline-flex;align-items:center;gap:6px;";
+  var dot = document.createElement("span");
+  dot.textContent = "  🔴 Grabando...";
+  dot.style.cssText = "font-size:12px;color:#ef4444;display:none;margin-left:6px;";
+  var row = document.getElementById("vc_row");
+  row.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;";
+  row.appendChild(btn);
+  row.appendChild(dot);
+
+  function g(id) { return document.getElementById(id); }
+
+  function setUI(on) {
+    g("vc_icon").textContent = on ? "⏹" : "🎤";
+    g("vc_lbl").textContent  = on ? "Parar" : "Dictar con voz";
+    btn.style.background     = on ? "#ef4444" : "#f1f5f9";
+    btn.style.color          = on ? "#fff"    : "#64748b";
+    btn.style.borderColor    = on ? "#ef4444" : "#d1d5db";
+    dot.style.display        = on ? "inline"  : "none";
+  }
+
+  btn.addEventListener("click", function() {
+    if (going) {
+      going = false;
+      if (recog) {
+        recog.onend = function(){};
+        recog.onerror = function(){};
+        recog.onresult = function(){};
+        try { recog.abort(); } catch(e) {}
+        recog = null;
+      }
+      g("vc_interim").textContent = "";
+      setUI(false);
+      if (captured.trim()) g("vc_actions").style.display = "block";
+    } else {
+      var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) { alert("Usa Chrome o Edge para dictar."); return; }
+      captured = "";
+      g("vc_final").textContent = "";
+      g("vc_interim").textContent = "";
+      g("vc_actions").style.display = "none";
+      g("vc_preview").style.display = "block";
+      recog = new SR();
+      recog.lang = "es-ES";
+      recog.continuous = true;
+      recog.interimResults = true;
+      recog.onresult = function(e) {
+        var interim = "";
+        for (var i = e.resultIndex; i < e.results.length; i++) {
+          if (e.results[i].isFinal) captured += e.results[i][0].transcript + " ";
+          else interim = e.results[i][0].transcript;
+        }
+        g("vc_final").textContent = captured;
+        g("vc_interim").textContent = interim;
+      };
+      recog.onend = function() { if (going) { try { recog.start(); } catch(e) {} } };
+      recog.onerror = function(ev) {
+        if (ev.error !== "no-speech") { going = false; setUI(false); if (captured.trim()) g("vc_actions").style.display = "block"; }
+      };
+      recog.start();
+      going = true;
+      setUI(true);
+    }
+  });
+
+  g("vc_use").addEventListener("click", function() {
+    var t = captured.trim();
+    if (!t) return;
+    var base = window.parent.location.href.split("?")[0];
+    window.parent.location.href = base + "?voice=" + encodeURIComponent(t);
+  });
+
+  g("vc_discard").addEventListener("click", function() {
+    captured = "";
+    g("vc_preview").style.display = "none";
+    g("vc_final").textContent = "";
+    g("vc_interim").textContent = "";
+    g("vc_actions").style.display = "none";
+  });
+})();
+</script>
+"""
+    st.components.v1.html(voice_html, height=110, scrolling=False)
 
     st.markdown("---")
 
