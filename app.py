@@ -477,11 +477,19 @@ with st.container(border=True):
             key="voice_recorder"
         )
         if voice_text:
-            current = st.session_state.get("desc_value", "")
-            st.session_state["desc_value"] = (current + " " + voice_text).strip()
-            st.info(f"✅ Texto añadido a la descripción: *{voice_text[:80]}{'...' if len(voice_text) > 80 else ''}*")
+            st.session_state["last_voice_text"] = voice_text
 
-        st.markdown("---")
+        if st.session_state.get("last_voice_text"):
+            st.markdown("**Texto dictado** — cópialo y pégalo en la descripción:")
+            st.text_area(
+                "voz",
+                value=st.session_state["last_voice_text"],
+                height=100,
+                disabled=True,
+                label_visibility="collapsed"
+            )
+
+    st.markdown("---")
 
     context = st.text_area(
         "Contexto técnico (opcional)",
