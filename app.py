@@ -115,6 +115,29 @@ def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, 
         return wit_client.create_work_item(document=patch_ops, project=project, type="Product Backlog Item")
 
 
+def create_child_tasks(wit_client, project, pbi_id, task_titles, iteration_path=None, area_path=None):
+    """Create Task work items as children of the given PBI, one per title in task_titles."""
+    from azure.devops.v7_1.work_item_tracking.models import JsonPatchOperation
+    org = st.secrets["AZURE_ORG"]
+    created = []
+    for title in task_titles:
+        patch = [
+            {"op": "add", "path": "/fields/System.Title", "value": title or "Task"},
+            {"op": "add", "path": "/relations/-", "value": {
+                "rel": "System.LinkTypes.Hierarchy-Reverse",
+                "url": f"https://dev.azure.com/{org}/_apis/wit/workItems/{pbi_id}",
+            }},
+        ]
+        if iteration_path:
+            patch.append({"op": "add", "path": "/fields/System.IterationPath", "value": iteration_path})
+        if area_path:
+            patch.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
+        patch_ops = [JsonPatchOperation(**p) for p in patch]
+        task = wit_client.create_work_item(document=patch_ops, project=project, type="Task")
+        created.append(task.id)
+    return created
+
+
 # ========== FIGMA ==========
 
 def parse_figma_url(url):
@@ -317,6 +340,31 @@ def render_pbi_card(pbi, idx, total):
                 parent = ""
                 if mode == "Crear nuevo PBI":
                     parent = st.text_input("Parent Feature ID (opcional)", placeholder="Ej: 177040", key=f"parent_{idx}")
+
+                # ---- Task creation ----
+                if mode == "Crear nuevo PBI":
+                    st.markdown("---")
+                    create_tasks = st.checkbox("Crear task(s) hija(s) automáticamente", key=f"create_tasks_{idx}")
+                    num_tasks = 1
+                    task_titles = []
+                    if create_tasks:
+                        num_tasks = st.number_input(
+                            "¿Cuántas tasks?",
+                            min_value=1, max_value=10, value=1, step=1,
+                            key=f"num_tasks_{idx}",
+                            help="Cada task quedará vinculada como hija (child) del PBI."
+                        )
+                        st.markdown("**Títulos de las tasks** *(edítalos si quieres)*")
+                        for t in range(int(num_tasks)):
+                            title = st.text_input(
+                                f"Task {t+1}",
+                                value=pbi["title"],
+                                key=f"task_title_{idx}_{t}",
+                                label_visibility="collapsed",
+                                placeholder=f"Título task {t+1}"
+                            )
+                            task_titles.append(title)
+
                 btn_label = "✅ Actualizar PBI" if existing_id else "✅ Crear PBI"
                 if st.button(btn_label, key=f"push_{idx}", type="primary", use_container_width=True):
                     with st.spinner("Enviando a Azure DevOps..."):
@@ -326,7 +374,24 @@ def render_pbi_card(pbi, idx, total):
                                 area_path=area if area.strip() else None, parent_id=parent_id,
                                 figma_b64=figma_b64, figma_link=figma_link, existing_id=existing_id)
                             action = "actualizado" if existing_id else "creado"
-                            st.success(f"✅ PBI {action} — ID: **{result.id}** — [Abrir en Azure](https://dev.azure.com/{st.secrets['AZURE_ORG']}/{st.secrets['AZURE_PROJECT']}/_workitems/edit/{result.id})")
+                            pbi_url = f"https://dev.azure.com/{st.secrets['AZURE_ORG']}/{st.secrets['AZURE_PROJECT']}/_workitems/edit/{result.id}"
+                            st.success(f"✅ PBI {action} — ID: **{result.id}** — [Abrir en Azure]({pbi_url})")
+
+                            # Create child tasks if requested
+                            if mode == "Crear nuevo PBI" and create_tasks and num_tasks > 0:
+                                with st.spinner(f"Creando {int(num_tasks)} task(s) hija(s)..."):
+                                    conn = get_azure_connection()
+                                    wit_client = conn.clients.get_work_item_tracking_client()
+                                    task_ids = create_child_tasks(
+                                        wit_client,
+                                        project=st.secrets["AZURE_PROJECT"],
+                                        pbi_id=result.id,
+                                        task_titles=task_titles,
+                                        iteration_path=iteration if iteration.strip() else None,
+                                        area_path=area if area.strip() else None,
+                                    )
+                                    ids_str = ", ".join(f"**{t}**" for t in task_ids)
+                                    st.success(f"✅ {len(task_ids)} task(s) creada(s) — IDs: {ids_str}")
                         except Exception as e:
                             st.error(f"Error: {e}")
 
