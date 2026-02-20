@@ -459,17 +459,8 @@ with st.container(border=True):
     if "desc_voice_val" not in st.session_state:
         st.session_state["desc_voice_val"] = ""
 
+    # Voice recorder — placed BEFORE textarea so voice text loads on same rerun
     col_desc, col_mic = st.columns([10, 1])
-    with col_desc:
-        description = st.text_area(
-            "Descripción funcional *",
-            value=st.session_state["desc_voice_val"],
-            placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
-            height=130,
-            key="desc_input"
-        )
-        st.session_state["desc_voice_val"] = description
-
     with col_mic:
         st.markdown("<div style='padding-top:28px'></div>", unsafe_allow_html=True)
         voice_text = speech_to_text(
@@ -482,7 +473,21 @@ with st.container(border=True):
         if voice_text:
             current = st.session_state.get("desc_voice_val", "")
             st.session_state["desc_voice_val"] = (current + " " + voice_text).strip()
-            st.rerun()
+
+    with col_desc:
+        # Use session_state key directly — no value= param to avoid conflict
+        if "desc_input" not in st.session_state:
+            st.session_state["desc_input"] = ""
+        # Sync voice text into the widget state before rendering
+        if st.session_state["desc_voice_val"] != st.session_state["desc_input"]:
+            st.session_state["desc_input"] = st.session_state["desc_voice_val"]
+        description = st.text_area(
+            "Descripción funcional *",
+            placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
+            height=130,
+            key="desc_input"
+        )
+        st.session_state["desc_voice_val"] = description
 
         st.markdown("---")
 
