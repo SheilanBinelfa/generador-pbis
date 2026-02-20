@@ -283,7 +283,7 @@ def generate_pbis(module, feature, description, context, images):
 
 # ========== PBI CARD ==========
 
-def render_pbi_card(pbi, idx, total):
+def render_pbi_card(pbi, idx, total, default_iteration="", default_area=""):
     figma_b64 = []
     figma_link = st.session_state.get("figma_url", None)
     if "figma_images" in st.session_state:
@@ -426,144 +426,286 @@ def render_pbi_card(pbi, idx, total):
 
 # ========== MAIN UI ==========
 
+from streamlit_mic_recorder import speech_to_text
+
 st.markdown("""
 <style>
-    .endalia-header {
-        background: linear-gradient(135deg, #1A56DB, #2563EB);
-        padding: 24px 32px;
-        border-radius: 12px;
-        margin-bottom: 24px;
-    }
-    .endalia-header h1 { color: white !important; font-size: 24px !important; font-weight: 700 !important; margin: 0 !important; }
-    .endalia-header p { color: rgba(255,255,255,0.8); font-size: 14px; margin: 4px 0 0 0; }
-    .stButton > button[kind="primary"] { background-color: #1A56DB !important; border-color: #1A56DB !important; }
-    .stButton > button[kind="primary"]:hover { background-color: #1E40AF !important; border-color: #1E40AF !important; }
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+
+/* ── Header ── */
+.pbi-header {
+    background: #0f172a;
+    border-bottom: 3px solid #2563EB;
+    padding: 20px 32px;
+    margin: -1rem -1rem 1.5rem -1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.pbi-header-left h1 {
+    color: #f8fafc !important;
+    font-size: 20px !important;
+    font-weight: 700 !important;
+    margin: 0 !important;
+    letter-spacing: -0.3px;
+}
+.pbi-header-left p {
+    color: #94a3b8;
+    font-size: 13px;
+    margin: 2px 0 0 0;
+}
+.pbi-badge {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-size: 12px;
+    color: #94a3b8;
+    font-family: 'IBM Plex Mono', monospace;
+    display: flex;
+    gap: 16px;
+}
+.pbi-badge span { color: #f8fafc; font-weight: 600; }
+
+/* ── Panels ── */
+.panel-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #64748b;
+    margin-bottom: 12px;
+}
+
+/* ── Defaults sprint ── */
+.defaults-bar {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+}
+
+/* ── PBI cards ── */
+.pbi-card-header {
+    background: #0f172a;
+    color: white;
+    padding: 10px 16px;
+    border-radius: 8px 8px 0 0;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.pbi-section {
+    border-left: 3px solid #2563EB;
+    padding: 8px 12px;
+    margin: 8px 0;
+    background: #f8fafc;
+    border-radius: 0 6px 6px 0;
+}
+.pbi-section-ac {
+    border-left: 3px solid #10b981;
+    padding: 8px 12px;
+    margin: 8px 0;
+    background: #f0fdf4;
+    border-radius: 0 6px 6px 0;
+}
+.pbi-section-val {
+    border-left: 3px solid #f59e0b;
+    padding: 8px 12px;
+    margin: 8px 0;
+    background: #fffbeb;
+    border-radius: 0 6px 6px 0;
+}
+.pbi-section-err {
+    border-left: 3px solid #ef4444;
+    padding: 8px 12px;
+    margin: 8px 0;
+    background: #fef2f2;
+    border-radius: 0 6px 6px 0;
+}
+.section-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    margin-bottom: 6px;
+}
+
+/* ── Progress stepper ── */
+.stepper {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 10px 0;
+}
+.step-done { color: #10b981; font-weight: 600; }
+.step-arrow { color: #94a3b8; }
+
+/* ── Generate button sticky ── */
+.stButton > button[kind="primary"] {
+    background: #2563EB !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    font-size: 15px !important;
+    padding: 12px !important;
+    transition: background .15s !important;
+}
+.stButton > button[kind="primary"]:hover {
+    background: #1d4ed8 !important;
+}
 </style>
-<div class="endalia-header">
+""", unsafe_allow_html=True)
+
+# ── Header con badge de estado ──
+n_pbis = len(st.session_state.get("result", {}).get("pbis", []))
+module_badge = st.session_state.get("_last_module", "—")
+sprint_badge = st.session_state.get("default_iteration", "—")
+
+st.markdown(f"""
+<div class="pbi-header">
+  <div class="pbi-header-left">
     <h1>📋 Generador de PBIs</h1>
     <p>Describe la funcionalidad → genera, edita y copia PBIs para Azure DevOps</p>
+  </div>
+  <div class="pbi-badge">
+    PBIs: <span>{n_pbis}</span>
+    &nbsp;·&nbsp; Módulo: <span>{module_badge}</span>
+    &nbsp;·&nbsp; Sprint: <span>{sprint_badge}</span>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
-with st.container(border=True):
-    col1, col2 = st.columns(2)
-    with col1:
-        module = st.text_input("Módulo", placeholder="Ej: Holidays & Absences")
-    with col2:
-        feature = st.text_input("Feature", placeholder="Ej: Políticas de V&A")
+# ── Layout dos columnas: formulario | resultados ──
+col_form, col_results = st.columns([5, 7], gap="large")
 
-    # Description textarea — the voice component will inject text into this
-    # Voice dictation using streamlit-mic-recorder (native Streamlit component)
-    from streamlit_mic_recorder import speech_to_text
+with col_form:
+    st.markdown('<div class="panel-label">⚙️ Configuración del PBI</div>', unsafe_allow_html=True)
 
-    # Textarea principal — usa desc_value como estado, sin key= para evitar conflictos
-    if "desc_value" not in st.session_state:
-        st.session_state["desc_value"] = ""
-    description = st.text_area(
-        "Descripción funcional *",
-        value=st.session_state["desc_value"],
-        placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
-        height=130
-    )
-    st.session_state["desc_value"] = description
+    # Defaults globales de sprint/área
+    with st.container(border=True):
+        st.markdown('<div class="panel-label" style="margin-bottom:8px">🗂️ Valores por defecto para Azure</div>', unsafe_allow_html=True)
+        dcol1, dcol2 = st.columns(2)
+        with dcol1:
+            default_iteration = st.text_input("Sprint por defecto", key="default_iteration", placeholder="Ej: MyProject/Sprint 3")
+        with dcol2:
+            default_area = st.text_input("Área por defecto", key="default_area", placeholder="Ej: MyProject/Team A")
 
-    # Voice dictation
-    with st.expander("🎤 Dictar con voz"):
-        voice_text = speech_to_text(
-            start_prompt="⏺️ Iniciar grabación",
-            stop_prompt="⏹️ Parar grabación",
-            language="es",
-            use_container_width=True,
-            key="voice_recorder"
+    with st.container(border=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            module = st.text_input("Módulo", placeholder="Ej: Holidays & Absences")
+        with c2:
+            feature = st.text_input("Feature", placeholder="Ej: Políticas de V&A")
+
+        if "desc_value" not in st.session_state:
+            st.session_state["desc_value"] = ""
+        description = st.text_area(
+            "Descripción funcional *",
+            value=st.session_state["desc_value"],
+            placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
+            height=150
         )
-        if voice_text:
-            st.session_state["last_voice_text"] = voice_text
+        st.session_state["desc_value"] = description
 
-        if st.session_state.get("last_voice_text"):
-            st.markdown("**Texto dictado** — cópialo y pégalo en la descripción:")
-            st.text_area(
-                "voz",
-                value=st.session_state["last_voice_text"],
-                height=100,
-                disabled=True,
-                label_visibility="collapsed"
+        with st.expander("🎤 Dictar con voz"):
+            voice_text = speech_to_text(
+                start_prompt="⏺️ Iniciar grabación",
+                stop_prompt="⏹️ Parar grabación",
+                language="es",
+                use_container_width=True,
+                key="voice_recorder"
             )
+            if voice_text:
+                st.session_state["last_voice_text"] = voice_text
+            if st.session_state.get("last_voice_text"):
+                st.markdown("**Texto dictado** — cópialo y pégalo arriba:")
+                st.text_area("voz", value=st.session_state["last_voice_text"],
+                             height=80, disabled=True, label_visibility="collapsed")
 
-    st.markdown("---")
+        context = st.text_area(
+            "Contexto técnico (opcional)",
+            placeholder="Endpoints, dependencias, restricciones...",
+            height=80
+        )
 
-    context = st.text_area(
-        "Contexto técnico (opcional)",
-        placeholder="Endpoints, dependencias, restricciones...",
-        height=80
-    )
+        st.markdown("**🎨 Prototipo**")
+        figma_available = "FIGMA_TOKEN" in st.secrets
+        tab_figma, tab_upload = st.tabs(["🔗 Figma", "📁 Capturas"])
 
-    st.markdown("---")
-    st.markdown("**🎨 Prototipo**")
-
-    figma_available = "FIGMA_TOKEN" in st.secrets
-    tab_figma, tab_upload = st.tabs(["🔗 Enlace de Figma", "📁 Subir capturas"])
-
-    with tab_figma:
-        if figma_available:
-            figma_url = st.text_input(
-                "URL del prototipo de Figma",
-                placeholder="https://www.figma.com/proto/... o https://www.figma.com/design/...",
-                key="figma_url"
-            )
-            if figma_url:
-                file_key, node_ids = parse_figma_url(figma_url)
-                if file_key:
-                    st.success("✅ Archivo detectado")
-                    if st.button("📸 Capturar pantalla de Figma"):
-                        with st.spinner("Exportando desde Figma..."):
-                            if not node_ids:
-                                st.warning("No se detectó un nodo específico en la URL.")
-                            else:
-                                figma_images = get_figma_images(file_key, node_ids, st.secrets["FIGMA_TOKEN"])
-                                if figma_images:
-                                    st.session_state["figma_images"] = figma_images
-                                    st.success(f"✅ {len(figma_images)} captura(s) exportada(s)")
+        with tab_figma:
+            if figma_available:
+                figma_url = st.text_input(
+                    "URL del prototipo",
+                    placeholder="https://www.figma.com/proto/...",
+                    key="figma_url"
+                )
+                if figma_url:
+                    file_key, node_ids = parse_figma_url(figma_url)
+                    if file_key:
+                        st.success("✅ Archivo detectado")
+                        if st.button("📸 Exportar desde Figma"):
+                            with st.spinner("Exportando..."):
+                                if not node_ids:
+                                    st.warning("No se detectó nodo en la URL.")
                                 else:
-                                    st.error("No se pudo exportar la imagen.")
-                    if "figma_images" in st.session_state and st.session_state["figma_images"]:
-                        st.markdown("**Capturas exportadas:**")
-                        for i, img in enumerate(st.session_state["figma_images"]):
-                            st.image(base64.b64decode(img["data"]), caption=f"Captura {i+1}", use_container_width=True)
-                        extra_nodes = st.text_input("¿Más pantallas? Pega otra URL de Figma", key="extra_figma")
-                        if extra_nodes and st.button("➕ Añadir captura"):
-                            extra_key, extra_ids = parse_figma_url(extra_nodes)
-                            if extra_key and extra_ids:
-                                with st.spinner("Exportando..."):
-                                    extra_images = get_figma_images(extra_key, extra_ids, st.secrets["FIGMA_TOKEN"])
-                                    if extra_images:
-                                        st.session_state["figma_images"].extend(extra_images)
-                                        st.rerun()
-                else:
-                    st.error("URL no válida.")
-        else:
-            st.info("Para conectar con Figma, añade `FIGMA_TOKEN` en los Secrets.")
+                                    figma_images = get_figma_images(file_key, node_ids, st.secrets["FIGMA_TOKEN"])
+                                    if figma_images:
+                                        st.session_state["figma_images"] = figma_images
+                                        st.success(f"✅ {len(figma_images)} captura(s)")
+                                    else:
+                                        st.error("No se pudo exportar.")
+                        if "figma_images" in st.session_state and st.session_state["figma_images"]:
+                            for i, img in enumerate(st.session_state["figma_images"]):
+                                st.image(base64.b64decode(img["data"]), caption=f"Captura {i+1}", use_container_width=True)
+                            extra_nodes = st.text_input("Añadir otra pantalla", key="extra_figma")
+                            if extra_nodes and st.button("➕ Añadir"):
+                                extra_key, extra_ids = parse_figma_url(extra_nodes)
+                                if extra_key and extra_ids:
+                                    with st.spinner("Exportando..."):
+                                        extra_images = get_figma_images(extra_key, extra_ids, st.secrets["FIGMA_TOKEN"])
+                                        if extra_images:
+                                            st.session_state["figma_images"].extend(extra_images)
+                                            st.rerun()
+                    else:
+                        st.error("URL no válida.")
+            else:
+                st.info("Añade `FIGMA_TOKEN` en Secrets para conectar con Figma.")
 
-    with tab_upload:
-        uploaded_files = st.file_uploader(
-            "Sube capturas manualmente",
-            type=["png", "jpg", "jpeg", "webp"],
-            accept_multiple_files=True,
-        )
-        if uploaded_files:
-            cols = st.columns(min(len(uploaded_files), 5))
-            for i, f in enumerate(uploaded_files):
-                with cols[i % 5]:
-                    st.image(f, caption=f"Captura {i+1}", width=120)
+        with tab_upload:
+            uploaded_files = st.file_uploader(
+                "Sube capturas",
+                type=["png", "jpg", "jpeg", "webp"],
+                accept_multiple_files=True,
+            )
+            if uploaded_files:
+                cols = st.columns(min(len(uploaded_files), 4))
+                for i, f in enumerate(uploaded_files):
+                    with cols[i % 4]:
+                        st.image(f, caption=f"Captura {i+1}", width=100)
 
-    generate_btn = st.button("🚀 Generar PBIs", type="primary", use_container_width=True)
+        st.markdown("")
+        generate_btn = st.button("🚀 Generar PBIs", type="primary", use_container_width=True)
 
 
 # ========== PROCESS ==========
 
+uploaded_files = uploaded_files if 'uploaded_files' in dir() else []
+
 if generate_btn:
     if not description.strip():
-        st.error("Añade una descripción funcional")
+        with col_form:
+            st.error("Añade una descripción funcional")
     else:
+        st.session_state["_last_module"] = module or "—"
         all_images = []
         if "figma_images" in st.session_state:
             for img in st.session_state["figma_images"]:
@@ -572,21 +714,48 @@ if generate_btn:
             for f in uploaded_files:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
                 all_images.append({"data": b64, "media_type": f.type or "image/png"})
-        with st.spinner("Analizando y generando PBIs..."):
-            try:
-                result = generate_pbis(module, feature, description, context, all_images)
-                st.session_state["result"] = result
-            except Exception as e:
-                st.error(f"Error al generar: {e}")
+        with col_results:
+            with st.spinner("Analizando y generando PBIs..."):
+                try:
+                    result = generate_pbis(module, feature, description, context, all_images)
+                    st.session_state["result"] = result
+                except Exception as e:
+                    st.error(f"Error al generar: {e}")
 
 
 # ========== DISPLAY RESULTS ==========
 
-if "result" in st.session_state:
-    result = st.session_state["result"]
-    st.markdown(f"## PBIs Generados ({len(result['pbis'])})")
-    if result.get("summary"):
-        st.info(f"💡 **Análisis de división:** {result['summary']}")
-    for i, pbi in enumerate(result["pbis"]):
-        with st.expander(f"US {i+1}/{len(result['pbis'])} — {pbi['title']}", expanded=True):
-            render_pbi_card(pbi, i, len(result["pbis"]))
+with col_results:
+    if "result" in st.session_state:
+        result = st.session_state["result"]
+        n = len(result["pbis"])
+
+        # Header de resultados con badge
+        st.markdown(f"""
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <div style="font-size:18px;font-weight:700;color:#0f172a;">
+                PBIs generados
+            </div>
+            <div style="background:#2563EB;color:white;border-radius:20px;padding:4px 14px;font-size:13px;font-weight:600;">
+                {n} PBI{'s' if n != 1 else ''}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if result.get("summary"):
+            st.info(f"💡 {result['summary']}")
+
+        for i, pbi in enumerate(result["pbis"]):
+            with st.expander(f"US {i+1}/{n} — {pbi['title']}", expanded=True):
+                render_pbi_card(pbi, i, n,
+                                default_iteration=st.session_state.get("default_iteration", ""),
+                                default_area=st.session_state.get("default_area", ""))
+    else:
+        st.markdown("""
+        <div style="height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+                    color:#94a3b8;border:2px dashed #e2e8f0;border-radius:12px;text-align:center;padding:32px;">
+            <div style="font-size:40px;margin-bottom:12px;">📋</div>
+            <div style="font-size:15px;font-weight:600;color:#64748b;">Aquí aparecerán los PBIs</div>
+            <div style="font-size:13px;margin-top:6px;">Rellena el formulario y pulsa Generar</div>
+        </div>
+        """, unsafe_allow_html=True)
