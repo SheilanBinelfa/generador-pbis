@@ -512,9 +512,23 @@ def build_voice_component(textarea_key: str) -> str:
             document.getElementById("dictInterim").textContent = interim;
         }};
 
-        recognition.onerror = () => stopRecording();
+        recognition.onerror = () => {{
+            isRecording = false;
+            setMicUI(false);
+            document.getElementById("micStatus").style.display = "none";
+        }};
         recognition.onend = () => {{
-            if (isRecording) {{ try {{ recognition.start(); }} catch(e) {{ stopRecording(); }} }}
+            // Only restart if still supposed to be recording
+            if (isRecording) {{
+                try {{ recognition.start(); }} 
+                catch(e) {{
+                    isRecording = false;
+                    showStopUI();
+                }}
+            }} else {{
+                // Naturally ended after stop() was called — show the action buttons
+                showStopUI();
+            }}
         }};
 
         recognition.start();
@@ -526,13 +540,16 @@ def build_voice_component(textarea_key: str) -> str:
 
     function stopRecording() {{
         isRecording = false;
-        if (recognition) {{ try {{ recognition.stop(); }} catch(e) {{}} }}
+        document.getElementById("dictInterim").textContent = "";
         setMicUI(false);
         document.getElementById("micStatus").style.display = "none";
-        document.getElementById("dictInterim").textContent = "";
+        if (recognition) {{ try {{ recognition.stop(); }} catch(e) {{ showStopUI(); }} }}
+        // showStopUI() will be called by onend after recognition.stop() completes
+    }}
+
+    function showStopUI() {{
         if (finalText.trim()) {{
-            const row = document.getElementById("actionRow");
-            row.style.display = "block";
+            document.getElementById("actionRow").style.display = "block";
         }}
     }}
 
