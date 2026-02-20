@@ -477,23 +477,9 @@ with st.container(border=True):
             key="voice_recorder"
         )
         if voice_text:
-            st.session_state["last_voice_text"] = voice_text
-
-        if st.session_state.get("last_voice_text"):
-            st.markdown("**Texto dictado:**")
-            st.code(st.session_state["last_voice_text"], language=None)
-            col_send, col_clear = st.columns([2, 1])
-            with col_send:
-                if st.button("⬆️ Enviar a descripción", key="send_voice", use_container_width=True, type="primary"):
-                    current = st.session_state.get("desc_value", "")
-                    voice = st.session_state["last_voice_text"]
-                    st.session_state["desc_value"] = (current + " " + voice).strip()
-                    del st.session_state["last_voice_text"]
-                    st.rerun()
-            with col_clear:
-                if st.button("🗑️ Limpiar", key="clear_voice", use_container_width=True):
-                    del st.session_state["last_voice_text"]
-                    st.rerun()
+            current = st.session_state.get("desc_value", "")
+            st.session_state["desc_value"] = (current + " " + voice_text).strip()
+            st.info(f"✅ Texto añadido a la descripción: *{voice_text[:80]}{'...' if len(voice_text) > 80 else ''}*")
 
         st.markdown("---")
 
