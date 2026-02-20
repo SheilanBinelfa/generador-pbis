@@ -465,6 +465,17 @@ with st.container(border=True):
     )
 
     # Voice dictation — resultado aparece en caja de texto copiable
+    # Handle clear and send BEFORE rendering widgets
+    if st.session_state.get("_voice_clear"):
+        st.session_state["last_voice_text"] = ""
+        st.session_state["_voice_clear"] = False
+    if st.session_state.get("_voice_send"):
+        current = st.session_state.get("desc_input", "")
+        appended = (current + " " + st.session_state.get("last_voice_text", "")).strip()
+        st.session_state["desc_input"] = appended
+        st.session_state["last_voice_text"] = ""
+        st.session_state["_voice_send"] = False
+
     with st.expander("🎤 Dictar con voz"):
         voice_text = speech_to_text(
             start_prompt="⏺️ Iniciar grabación",
@@ -477,11 +488,17 @@ with st.container(border=True):
             st.session_state["last_voice_text"] = voice_text
 
         if st.session_state.get("last_voice_text"):
-            st.markdown("**Texto dictado** — cópialo y pégalo en el campo de descripción:")
+            st.markdown("**Texto dictado:**")
             st.code(st.session_state["last_voice_text"], language=None)
-            if st.button("🗑️ Limpiar", key="clear_voice"):
-                st.session_state["last_voice_text"] = ""
-                st.rerun()
+            col_send, col_clear = st.columns([2, 1])
+            with col_send:
+                if st.button("⬆️ Enviar a descripción", key="send_voice", use_container_width=True, type="primary"):
+                    st.session_state["_voice_send"] = True
+                    st.rerun()
+            with col_clear:
+                if st.button("🗑️ Limpiar", key="clear_voice", use_container_width=True):
+                    st.session_state["_voice_clear"] = True
+                    st.rerun()
 
         st.markdown("---")
 
