@@ -543,8 +543,12 @@ def build_voice_component(textarea_key: str) -> str:
         document.getElementById("dictInterim").textContent = "";
         setMicUI(false);
         document.getElementById("micStatus").style.display = "none";
-        if (recognition) {{ try {{ recognition.stop(); }} catch(e) {{ showStopUI(); }} }}
-        // showStopUI() will be called by onend after recognition.stop() completes
+        if (recognition) {{
+            try {{ recognition.stop(); }} catch(e) {{}}
+            recognition = null;
+        }}
+        // Show UI immediately — don't wait for onend
+        showStopUI();
     }}
 
     function showStopUI() {{
