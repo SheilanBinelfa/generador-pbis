@@ -412,10 +412,26 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area=""):
         st.markdown("**🚨 Estados de Error**")
         for i, e in enumerate(pbi["error_states"]):
             pbi["error_states"][i] = st.text_input(f"E{i+1}", e, key=f"e_{idx}_{i}", label_visibility="collapsed")
-    if pbi.get("prototype_refs"):
+    if pbi.get("prototype_refs") or "figma_images" in st.session_state or "uploaded_b64" in st.session_state:
         st.markdown("**🖼️ Prototipo**")
-        for i, r in enumerate(pbi["prototype_refs"]):
-            pbi["prototype_refs"][i] = st.text_input(f"P{i+1}", r, key=f"pr_{idx}_{i}", label_visibility="collapsed")
+        # Show figma link
+        figma_link_val = st.session_state.get("figma_url", "")
+        if figma_link_val:
+            st.markdown(f"[🔗 Ver prototipo en Figma]({figma_link_val})")
+        # Show uploaded images inline
+        all_imgs = []
+        if "figma_images" in st.session_state:
+            all_imgs += [base64.b64decode(img["data"]) for img in st.session_state["figma_images"]]
+        if "uploaded_b64" in st.session_state:
+            all_imgs += [base64.b64decode(b) for b in st.session_state["uploaded_b64"]]
+        if all_imgs:
+            img_cols = st.columns(min(len(all_imgs), 3))
+            for ci, img_bytes in enumerate(all_imgs):
+                with img_cols[ci % 3]:
+                    st.image(img_bytes, caption=f"Captura {ci+1}", use_container_width=True)
+        if pbi.get("prototype_refs"):
+            for i, r in enumerate(pbi["prototype_refs"]):
+                pbi["prototype_refs"][i] = st.text_input(f"P{i+1}", r, key=f"pr_{idx}_{i}", label_visibility="collapsed")
     if pbi.get("tech_notes"):
         st.markdown("**💡 Notas Técnicas**")
         for i, n in enumerate(pbi["tech_notes"]):
@@ -606,15 +622,12 @@ with col_form:
         with c2:
             feature = st.text_input("Feature", placeholder="Ej: Políticas de V&A")
 
-        if "desc_value" not in st.session_state:
-            st.session_state["desc_value"] = ""
         description = st.text_area(
             "Descripción funcional *",
-            value=st.session_state["desc_value"],
             placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
-            height=150
+            height=150,
+            key="desc_input"
         )
-        st.session_state["desc_value"] = description
 
         with st.expander("🎤 Dictar con voz"):
             voice_text = speech_to_text(
@@ -628,8 +641,7 @@ with col_form:
                 st.session_state["last_voice_text"] = voice_text
             if st.session_state.get("last_voice_text"):
                 st.markdown("**Texto dictado** — cópialo y pégalo arriba:")
-                st.text_area("voz", value=st.session_state["last_voice_text"],
-                             height=80, disabled=True, label_visibility="collapsed")
+                st.code(st.session_state["last_voice_text"], language=None)
 
         context = st.text_area(
             "Contexto técnico (opcional)",
@@ -701,6 +713,7 @@ with col_form:
 uploaded_files = uploaded_files if 'uploaded_files' in dir() else []
 
 if generate_btn:
+    description = st.session_state.get("desc_input", "")
     if not description.strip():
         with col_form:
             st.error("Añade una descripción funcional")
@@ -711,9 +724,12 @@ if generate_btn:
             for img in st.session_state["figma_images"]:
                 all_images.append({"data": img["data"], "media_type": img["media_type"]})
         if uploaded_files:
+            uploaded_b64_list = []
             for f in uploaded_files:
                 b64 = base64.b64encode(f.read()).decode("utf-8")
                 all_images.append({"data": b64, "media_type": f.type or "image/png"})
+                uploaded_b64_list.append(b64)
+            st.session_state["uploaded_b64"] = uploaded_b64_list
         with col_results:
             with st.spinner("Analizando y generando PBIs..."):
                 try:
