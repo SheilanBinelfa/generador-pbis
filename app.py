@@ -488,15 +488,32 @@ st.markdown("""
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap');
 html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif !important; }
 
-.topbar { background:#0f172a; border-bottom:2px solid #1e293b; padding:0 24px;
+.topbar {
+    background:#ffffff;
+    border-bottom:1px solid #e2e8f0;
+    padding:0 28px;
     display:flex; align-items:center; justify-content:space-between;
-    height:52px; margin:-1rem -1rem 1.5rem -1rem; }
-.topbar h1 { color:#f8fafc !important; font-size:15px !important; font-weight:700 !important; margin:0 !important; }
-.topbar-sub { color:#475569; font-size:12px; margin-left:8px; }
-.topbar-badges { display:flex; gap:6px; }
-.tbadge { background:#1e293b; border:1px solid #2d3f55; border-radius:6px;
-    padding:3px 10px; font-size:11px; color:#94a3b8; font-family:'IBM Plex Mono',monospace; white-space:nowrap; }
-.tbadge b { color:#e2e8f0; }
+    height:58px; margin:-1rem -1rem 1.5rem -1rem;
+    box-shadow:0 1px 3px rgba(0,0,0,.06);
+}
+.topbar-brand { display:flex; align-items:center; gap:10px; }
+.topbar-brand h1 {
+    color:#0f172a !important; font-size:15px !important;
+    font-weight:700 !important; margin:0 !important; letter-spacing:-.3px;
+}
+.topbar-divider { width:1px; height:20px; background:#e2e8f0; }
+.topbar-sub { color:#94a3b8; font-size:12px; }
+.topbar-badges { display:flex; gap:6px; align-items:center; }
+.tbadge {
+    display:inline-flex; align-items:center; gap:5px;
+    background:#eff6ff; border:1px solid #bfdbfe;
+    border-radius:20px; padding:4px 12px;
+    font-size:12px; color:#3b82f6; font-weight:500; white-space:nowrap;
+}
+.tbadge .badge-label { color:#93c5fd; font-size:10px; text-transform:uppercase; letter-spacing:.5px; font-weight:600; }
+.tbadge .badge-val { color:#1d4ed8; font-weight:700; }
+.tbadge-zero { background:#f8fafc; border-color:#e2e8f0; }
+.tbadge-zero .badge-val { color:#94a3b8; }
 
 .stepper { display:flex; background:#f1f5f9; border-radius:10px; overflow:hidden;
     border:1px solid #e2e8f0; margin-bottom:20px; }
@@ -541,15 +558,29 @@ pushed_count = sum(1 for k in st.session_state if k.startswith("pushed_"))
 
 st.markdown(f"""
 <div class="topbar">
-  <div style="display:flex;align-items:center;gap:12px;">
-    <h1>📋 Generador de PBIs</h1>
-    <span class="topbar-sub">Describe → Genera → Empuja a Azure</span>
+  <div class="topbar-brand">
+    <span style="font-size:20px;">📋</span>
+    <h1>Generador de PBIs</h1>
+    <div class="topbar-divider"></div>
+    <span class="topbar-sub">Describe · Genera · Push Azure</span>
   </div>
   <div class="topbar-badges">
-    <div class="tbadge">PBIs <b>{n_pbis}</b></div>
-    <div class="tbadge">Pusheados <b>{pushed_count}</b></div>
-    <div class="tbadge">Módulo <b>{module_badge}</b></div>
-    <div class="tbadge">Sprint <b>{sprint_badge}</b></div>
+    <div class="tbadge {'tbadge-zero' if n_pbis==0 else ''}">
+      <span class="badge-label">PBIs</span>
+      <span class="badge-val">{n_pbis}</span>
+    </div>
+    <div class="tbadge {'tbadge-zero' if pushed_count==0 else ''}">
+      <span class="badge-label">Pusheados</span>
+      <span class="badge-val">{pushed_count}</span>
+    </div>
+    <div class="tbadge tbadge-zero">
+      <span class="badge-label">Módulo</span>
+      <span class="badge-val">{module_badge}</span>
+    </div>
+    <div class="tbadge tbadge-zero">
+      <span class="badge-label">Sprint</span>
+      <span class="badge-val">{sprint_badge}</span>
+    </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
