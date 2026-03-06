@@ -65,7 +65,7 @@ def upload_image_to_azure(wit_client, image_b64, filename, project):
     return attachment.url
 
 
-def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, figma_b64=None, figma_link=None, existing_id=None):
+def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, figma_b64=None, figma_link=None, existing_id=None, endalia_module=None, microservice=None, value_area=None):
     from azure.devops.v7_1.work_item_tracking.models import JsonPatchOperation
     conn = get_azure_connection()
     wit_client = conn.clients.get_work_item_tracking_client()
@@ -106,6 +106,12 @@ def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, 
             patch.append({"op": "add", "path": "/fields/System.IterationPath", "value": iteration_path})
         if area_path:
             patch.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
+        if endalia_module:
+            patch.append({"op": "add", "path": "/fields/Custom.EndaliaModule", "value": endalia_module})
+        if microservice:
+            patch.append({"op": "add", "path": "/fields/Custom.MicroserviceVersion", "value": microservice})
+        if value_area:
+            patch.append({"op": "add", "path": "/fields/Microsoft.VSTS.Common.ValueArea", "value": value_area})
         if parent_id:
             patch.append({"op": "add", "path": "/relations/-", "value": {
                 "rel": "System.LinkTypes.Hierarchy-Reverse",
@@ -283,7 +289,7 @@ def generate_pbis(module, feature, description, context, images):
 
 # ========== PBI CARD ==========
 
-def render_pbi_card(pbi, idx, total, default_iteration="", default_area=""):
+def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", default_module="", default_microservice="", default_value_area=""):
     figma_b64 = []
     figma_link = st.session_state.get("figma_url", None)
     if "figma_images" in st.session_state:
@@ -335,8 +341,18 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area=""):
                     existing_id_str = st.text_input("ID del Work Item", placeholder="Ej: 203734", key=f"existing_{idx}")
                     if existing_id_str:
                         existing_id = int(existing_id_str)
-                iteration = st.text_input("Iteration Path", placeholder="Ej: SWAre\\2026\\PRODUCT\\Q1\\IT3", key=f"iter_{idx}")
-                area = st.text_input("Area Path", placeholder="Ej: SWAre\\Time", key=f"area_{idx}")
+                iteration = st.text_input("Iteration Path", value=default_iteration, key=f"iter_{idx}")
+                area = st.text_input("Area Path", value=default_area, key=f"area_{idx}")
+
+                st.markdown("---")
+                mc1, mc2 = st.columns(2)
+                with mc1:
+                    endalia_module = st.selectbox("Endalia Module", ["Registro y planificación horaria", "Vacaciones y ausencias"], key=f"emodule_{idx}")
+                    value_area = st.selectbox("Value Area", ["Product improvement", "Roadmap", "Operations improvement"], key=f"varea_{idx}")
+                with mc2:
+                    microservice = st.selectbox("Microservice Version", ["Candidate", "Candidate+1"], key=f"msvc_{idx}")
+
+                st.markdown("---")
                 parent = ""
                 if mode == "Crear nuevo PBI":
                     parent = st.text_input("Parent Feature ID (opcional)", placeholder="Ej: 177040", key=f"parent_{idx}")
@@ -372,7 +388,8 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area=""):
                             parent_id = int(parent) if parent and parent.strip() else None
                             result = push_pbi_to_azure(pbi, iteration_path=iteration if iteration.strip() else None,
                                 area_path=area if area.strip() else None, parent_id=parent_id,
-                                figma_b64=figma_b64, figma_link=figma_link, existing_id=existing_id)
+                                figma_b64=figma_b64, figma_link=figma_link, existing_id=existing_id,
+                                endalia_module=endalia_module, microservice=microservice, value_area=value_area)
                             action = "actualizado" if existing_id else "creado"
                             pbi_url = f"https://dev.azure.com/{st.secrets['AZURE_ORG']}/{st.secrets['AZURE_PROJECT']}/_workitems/edit/{result.id}"
                             st.success(f"✅ PBI {action} — ID: **{result.id}** — [Abrir en Azure]({pbi_url})")
@@ -611,9 +628,32 @@ with col_form:
         st.markdown('<div class="panel-label" style="margin-bottom:8px">🗂️ Valores por defecto para Azure</div>', unsafe_allow_html=True)
         dcol1, dcol2 = st.columns(2)
         with dcol1:
-            default_iteration = st.text_input("Sprint por defecto", key="default_iteration", placeholder="Ej: MyProject/Sprint 3")
+            default_iteration = st.text_input(
+                "Iteration Path",
+                key="default_iteration",
+                value=st.session_state.get("default_iteration", "SWArea")
+            )
+            default_module = st.selectbox(
+                "Endalia Module",
+                ["Registro y planificación horaria", "Vacaciones y ausencias"],
+                key="default_module"
+            )
         with dcol2:
-            default_area = st.text_input("Área por defecto", key="default_area", placeholder="Ej: MyProject/Team A")
+            default_area = st.text_input(
+                "Area Path",
+                key="default_area",
+                value=st.session_state.get("default_area", "SWArea\\Product\\Core\\CoreProduct1")
+            )
+            dcol_ms, dcol_va = st.columns(2)
+            with dcol_ms:
+                default_microservice = st.selectbox("Microservice", ["Candidate", "Candidate+1"], key="default_microservice")
+            with dcol_va:
+                default_value_area = st.selectbox("Value Area", ["Product improvement", "Roadmap", "Operations improvement"], key="default_value_area")
+
+        if st.button("🔄 Nuevo PBI — limpiar todo", use_container_width=True):
+            for k in ["result", "desc_value", "figma_images", "uploaded_b64", "last_voice_text", "figma_url", "_last_module", "desc_input"]:
+                st.session_state.pop(k, None)
+            st.rerun()
 
     with st.container(border=True):
         c1, c2 = st.columns(2)
@@ -765,7 +805,10 @@ with col_results:
             with st.expander(f"US {i+1}/{n} — {pbi['title']}", expanded=True):
                 render_pbi_card(pbi, i, n,
                                 default_iteration=st.session_state.get("default_iteration", ""),
-                                default_area=st.session_state.get("default_area", ""))
+                                default_area=st.session_state.get("default_area", ""),
+                                default_module=st.session_state.get("default_module", "Registro y planificación horaria"),
+                                default_microservice=st.session_state.get("default_microservice", "Candidate"),
+                                default_value_area=st.session_state.get("default_value_area", "Product improvement"))
     else:
         st.markdown("""
         <div style="height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;
