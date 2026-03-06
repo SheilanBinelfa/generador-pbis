@@ -290,6 +290,7 @@ def generate_pbis(module, feature, description, context, images):
 # ========== PBI CARD ==========
 
 def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", default_module="", default_microservice="", default_value_area=""):
+    import json as _json
     figma_b64 = []
     figma_link = st.session_state.get("figma_url", None)
     if "figma_images" in st.session_state:
@@ -298,20 +299,34 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
         figma_b64.extend(st.session_state["uploaded_b64"])
 
     html_content = pbi_to_html(pbi, figma_b64, figma_link)
+    pushed_key = f"pushed_{idx}"
 
+    # ── Card header ──
+    pushed_info = st.session_state.get(pushed_key, None)
+    pushed_badge = f'<span class="pbi-pushed-badge">✅ #{pushed_info}</span>' if pushed_info else ""
+    st.markdown(f"""
+    <div class="pbi-card-header" style="border-radius:8px 8px 0 0;">
+        <span class="pbi-card-title">{pbi['title']}</span>
+        <span class="pbi-card-num">US {idx+1}/{total}</span>
+        {pushed_badge}
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── Action buttons ──
     col_copy, col_push = st.columns([1, 1])
     with col_copy:
         st.components.v1.html(f"""
-        <div>
-            <button onclick="copyHtml()" style="background:#6366f1;color:#fff;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;font-size:13px;font-weight:600;">
+        <div style="padding:4px 0;">
+            <button onclick="copyHtml_{idx}()" style="width:100%;background:#6366f1;color:#fff;border:none;border-radius:8px;
+                padding:9px 0;cursor:pointer;font-size:13px;font-weight:600;font-family:\'IBM Plex Sans\',sans-serif;">
                 📋 Copiar para Azure
             </button>
-            <span id="status_{idx}" style="margin-left:8px;font-size:13px;color:#10b981;display:none;">✓ Copiado</span>
+            <div id="copied_{idx}" style="margin-top:6px;font-size:12px;color:#10b981;display:none;text-align:center;">✓ Copiado al portapapeles</div>
         </div>
         <script>
-        async function copyHtml() {{
-            const html = {json.dumps(html_content)};
-            const plain = {json.dumps(pbi['title'])};
+        async function copyHtml_{idx}() {{
+            const html = {_json.dumps(html_content)};
+            const plain = {_json.dumps(pbi['title'])};
             try {{
                 await navigator.clipboard.write([new ClipboardItem({{
                     "text/html": new Blob([html], {{type:"text/html"}}),
@@ -325,15 +340,15 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                 const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
                 document.execCommand("copy"); sel.removeAllRanges(); document.body.removeChild(div);
             }}
-            const s = document.getElementById("status_{idx}");
-            s.style.display = "inline"; setTimeout(() => s.style.display = "none", 2000);
+            const s = document.getElementById("copied_{idx}");
+            s.style.display = "block"; setTimeout(() => s.style.display = "none", 2500);
         }}
-        </script>""", height=50)
+        </script>""", height=60)
 
     azure_available = all(k in st.secrets for k in ["AZURE_PAT", "AZURE_ORG", "AZURE_PROJECT"])
     with col_push:
         if azure_available:
-            with st.popover("🚀 Push to Azure", use_container_width=True):
+            with st.popover("🚀 Push to Azure DevOps", use_container_width=True):
                 st.markdown(f"**`{pbi['title']}`**")
                 mode = st.radio("Acción", ["Crear nuevo PBI", "Actualizar PBI existente"], key=f"mode_{idx}", horizontal=True)
                 existing_id = None
@@ -341,101 +356,107 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                     existing_id_str = st.text_input("ID del Work Item", placeholder="Ej: 203734", key=f"existing_{idx}")
                     if existing_id_str:
                         existing_id = int(existing_id_str)
-                iteration = st.text_input("Iteration Path", value=default_iteration, key=f"iter_{idx}")
-                area = st.text_input("Area Path", value=default_area, key=f"area_{idx}")
 
-                st.markdown("---")
-                mc1, mc2 = st.columns(2)
-                with mc1:
-                    endalia_module = st.selectbox("Endalia Module", ["Registro y planificación horaria", "Vacaciones y ausencias"], key=f"emodule_{idx}")
-                    value_area = st.selectbox("Value Area", ["Product improvement", "Roadmap", "Operations improvement"], key=f"varea_{idx}")
-                with mc2:
-                    microservice = st.selectbox("Microservice Version", ["Candidate", "Candidate+1"], key=f"msvc_{idx}")
+                c1, c2 = st.columns(2)
+                with c1:
+                    iteration = st.text_input("Iteration Path", value=default_iteration, key=f"iter_{idx}")
+                    endalia_module = st.selectbox("Endalia Module",
+                        ["Registro y planificación horaria", "Vacaciones y ausencias"],
+                        index=0 if default_module not in ["Registro y planificación horaria","Vacaciones y ausencias"]
+                              else ["Registro y planificación horaria","Vacaciones y ausencias"].index(default_module),
+                        key=f"emodule_{idx}")
+                    value_area = st.selectbox("Value Area",
+                        ["Product improvement", "Roadmap", "Operations improvement"],
+                        key=f"varea_{idx}")
+                with c2:
+                    area = st.text_input("Area Path", value=default_area, key=f"area_{idx}")
+                    microservice = st.selectbox("Microservice Version",
+                        ["Candidate", "Candidate+1"],
+                        index=0 if default_microservice not in ["Candidate","Candidate+1"]
+                              else ["Candidate","Candidate+1"].index(default_microservice),
+                        key=f"msvc_{idx}")
 
-                st.markdown("---")
                 parent = ""
                 if mode == "Crear nuevo PBI":
                     parent = st.text_input("Parent Feature ID (opcional)", placeholder="Ej: 177040", key=f"parent_{idx}")
-
-                # ---- Task creation ----
-                if mode == "Crear nuevo PBI":
                     st.markdown("---")
                     create_tasks = st.checkbox("Crear task(s) hija(s) automáticamente", key=f"create_tasks_{idx}")
                     num_tasks = 1
                     task_titles = []
                     if create_tasks:
-                        num_tasks = st.number_input(
-                            "¿Cuántas tasks?",
-                            min_value=1, max_value=10, value=1, step=1,
-                            key=f"num_tasks_{idx}",
-                            help="Cada task quedará vinculada como hija (child) del PBI."
-                        )
-                        st.markdown("**Títulos de las tasks** *(edítalos si quieres)*")
+                        num_tasks = st.number_input("¿Cuántas tasks?", min_value=1, max_value=10, value=1, step=1, key=f"num_tasks_{idx}")
+                        st.markdown("**Títulos de las tasks**")
                         for t in range(int(num_tasks)):
-                            title = st.text_input(
-                                f"Task {t+1}",
-                                value=pbi["title"],
-                                key=f"task_title_{idx}_{t}",
-                                label_visibility="collapsed",
-                                placeholder=f"Título task {t+1}"
-                            )
+                            title = st.text_input(f"Task {t+1}", value=pbi["title"],
+                                key=f"task_title_{idx}_{t}", label_visibility="collapsed")
                             task_titles.append(title)
 
-                btn_label = "✅ Actualizar PBI" if existing_id else "✅ Crear PBI"
+                btn_label = "✅ Actualizar PBI" if existing_id else "✅ Crear PBI en Azure"
                 if st.button(btn_label, key=f"push_{idx}", type="primary", use_container_width=True):
                     with st.spinner("Enviando a Azure DevOps..."):
                         try:
                             parent_id = int(parent) if parent and parent.strip() else None
-                            result = push_pbi_to_azure(pbi, iteration_path=iteration if iteration.strip() else None,
-                                area_path=area if area.strip() else None, parent_id=parent_id,
-                                figma_b64=figma_b64, figma_link=figma_link, existing_id=existing_id,
-                                endalia_module=endalia_module, microservice=microservice, value_area=value_area)
-                            action = "actualizado" if existing_id else "creado"
+                            result = push_pbi_to_azure(pbi,
+                                iteration_path=iteration if iteration.strip() else None,
+                                area_path=area if area.strip() else None,
+                                parent_id=parent_id, figma_b64=figma_b64,
+                                figma_link=figma_link, existing_id=existing_id,
+                                endalia_module=endalia_module, microservice=microservice,
+                                value_area=value_area)
                             pbi_url = f"https://dev.azure.com/{st.secrets['AZURE_ORG']}/{st.secrets['AZURE_PROJECT']}/_workitems/edit/{result.id}"
-                            st.success(f"✅ PBI {action} — ID: **{result.id}** — [Abrir en Azure]({pbi_url})")
+                            st.success(f"✅ PBI {'actualizado' if existing_id else 'creado'} — **#{result.id}** — [Abrir ↗]({pbi_url})")
+                            st.session_state[pushed_key] = result.id
 
-                            # Create child tasks if requested
                             if mode == "Crear nuevo PBI" and create_tasks and num_tasks > 0:
-                                with st.spinner(f"Creando {int(num_tasks)} task(s) hija(s)..."):
+                                with st.spinner(f"Creando {int(num_tasks)} task(s)..."):
                                     conn = get_azure_connection()
                                     wit_client = conn.clients.get_work_item_tracking_client()
-                                    task_ids = create_child_tasks(
-                                        wit_client,
+                                    task_ids = create_child_tasks(wit_client,
                                         project=st.secrets["AZURE_PROJECT"],
-                                        pbi_id=result.id,
-                                        task_titles=task_titles,
+                                        pbi_id=result.id, task_titles=task_titles,
                                         iteration_path=iteration if iteration.strip() else None,
-                                        area_path=area if area.strip() else None,
-                                    )
-                                    ids_str = ", ".join(f"**{t}**" for t in task_ids)
-                                    st.success(f"✅ {len(task_ids)} task(s) creada(s) — IDs: {ids_str}")
+                                        area_path=area if area.strip() else None)
+                                    st.success(f"✅ {len(task_ids)} task(s) — IDs: {', '.join(f'**{t}**' for t in task_ids)}")
                         except Exception as e:
                             st.error(f"Error: {e}")
 
+    # ── Editable fields with visual sections ──
+    st.markdown('<div style="padding:12px 0 0 0;">', unsafe_allow_html=True)
+
     pbi["objective"] = st.text_input("🎯 Objetivo", pbi["objective"], key=f"obj_{idx}")
-    st.markdown("**👤 Historia de Usuario**")
-    pbi["role"] = st.text_input("Como", pbi["role"], key=f"role_{idx}")
-    pbi["when"] = st.text_input("Cuando", pbi["when"], key=f"when_{idx}")
-    pbi["then"] = st.text_input("Entonces", pbi["then"], key=f"then_{idx}")
-    pbi["benefit"] = st.text_input("Para", pbi["benefit"], key=f"ben_{idx}")
-    st.markdown("**✅ Happy Path**")
+
+    st.markdown('<div class="pbi-us-block">', unsafe_allow_html=True)
+    st.markdown('<div class="pbi-section-title" style="color:#1d4ed8;">👤 Historia de Usuario</div>', unsafe_allow_html=True)
+    pbi["role"] = st.text_input("Como", pbi["role"], key=f"role_{idx}", label_visibility="collapsed")
+    pbi["when"] = st.text_input("Cuando", pbi["when"], key=f"when_{idx}", label_visibility="collapsed")
+    pbi["then"] = st.text_input("Entonces", pbi["then"], key=f"then_{idx}", label_visibility="collapsed")
+    pbi["benefit"] = st.text_input("Para", pbi["benefit"], key=f"ben_{idx}", label_visibility="collapsed")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('<div class="pbi-ac-block">', unsafe_allow_html=True)
+    st.markdown('<div class="pbi-section-title" style="color:#15803d;">✅ Happy Path</div>', unsafe_allow_html=True)
     for i, ac in enumerate(pbi.get("happy_path", [])):
         pbi["happy_path"][i] = st.text_input(f"AC{i+1}", ac, key=f"hp_{idx}_{i}", label_visibility="collapsed")
+    st.markdown('</div>', unsafe_allow_html=True)
+
     if pbi.get("validations"):
-        st.markdown("**⚠️ Validaciones**")
+        st.markdown('<div class="pbi-val-block">', unsafe_allow_html=True)
+        st.markdown('<div class="pbi-section-title" style="color:#b45309;">⚠️ Validaciones</div>', unsafe_allow_html=True)
         for i, v in enumerate(pbi["validations"]):
             pbi["validations"][i] = st.text_input(f"V{i+1}", v, key=f"v_{idx}_{i}", label_visibility="collapsed")
+        st.markdown('</div>', unsafe_allow_html=True)
+
     if pbi.get("error_states"):
-        st.markdown("**🚨 Estados de Error**")
+        st.markdown('<div class="pbi-err-block">', unsafe_allow_html=True)
+        st.markdown('<div class="pbi-section-title" style="color:#b91c1c;">🚨 Estados de Error</div>', unsafe_allow_html=True)
         for i, e in enumerate(pbi["error_states"]):
             pbi["error_states"][i] = st.text_input(f"E{i+1}", e, key=f"e_{idx}_{i}", label_visibility="collapsed")
+        st.markdown('</div>', unsafe_allow_html=True)
+
     if pbi.get("prototype_refs") or "figma_images" in st.session_state or "uploaded_b64" in st.session_state:
         st.markdown("**🖼️ Prototipo**")
-        # Show figma link
-        figma_link_val = st.session_state.get("figma_url", "")
-        if figma_link_val:
-            st.markdown(f"[🔗 Ver prototipo en Figma]({figma_link_val})")
-        # Show uploaded images inline
+        if figma_link:
+            st.markdown(f"[🔗 Ver prototipo en Figma]({figma_link})")
         all_imgs = []
         if "figma_images" in st.session_state:
             all_imgs += [base64.b64decode(img["data"]) for img in st.session_state["figma_images"]]
@@ -449,12 +470,13 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
         if pbi.get("prototype_refs"):
             for i, r in enumerate(pbi["prototype_refs"]):
                 pbi["prototype_refs"][i] = st.text_input(f"P{i+1}", r, key=f"pr_{idx}_{i}", label_visibility="collapsed")
+
     if pbi.get("tech_notes"):
         st.markdown("**💡 Notas Técnicas**")
         for i, n in enumerate(pbi["tech_notes"]):
             pbi["tech_notes"][i] = st.text_input(f"N{i+1}", n, key=f"tn_{idx}_{i}", label_visibility="collapsed")
 
-
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ========== MAIN UI ==========
@@ -463,198 +485,120 @@ from streamlit_mic_recorder import speech_to_text
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap');
+html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif !important; }
 
-html, body, [class*="css"] {
-    font-family: 'IBM Plex Sans', sans-serif;
-}
+.topbar { background:#0f172a; border-bottom:2px solid #1e293b; padding:0 24px;
+    display:flex; align-items:center; justify-content:space-between;
+    height:52px; margin:-1rem -1rem 1.5rem -1rem; }
+.topbar h1 { color:#f8fafc !important; font-size:15px !important; font-weight:700 !important; margin:0 !important; }
+.topbar-sub { color:#475569; font-size:12px; margin-left:8px; }
+.topbar-badges { display:flex; gap:6px; }
+.tbadge { background:#1e293b; border:1px solid #2d3f55; border-radius:6px;
+    padding:3px 10px; font-size:11px; color:#94a3b8; font-family:'IBM Plex Mono',monospace; white-space:nowrap; }
+.tbadge b { color:#e2e8f0; }
 
-/* ── Header ── */
-.pbi-header {
-    background: #0f172a;
-    border-bottom: 3px solid #2563EB;
-    padding: 20px 32px;
-    margin: -1rem -1rem 1.5rem -1rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-.pbi-header-left h1 {
-    color: #f8fafc !important;
-    font-size: 20px !important;
-    font-weight: 700 !important;
-    margin: 0 !important;
-    letter-spacing: -0.3px;
-}
-.pbi-header-left p {
-    color: #94a3b8;
-    font-size: 13px;
-    margin: 2px 0 0 0;
-}
-.pbi-badge {
-    background: #1e293b;
-    border: 1px solid #334155;
-    border-radius: 8px;
-    padding: 8px 16px;
-    font-size: 12px;
-    color: #94a3b8;
-    font-family: 'IBM Plex Mono', monospace;
-    display: flex;
-    gap: 16px;
-}
-.pbi-badge span { color: #f8fafc; font-weight: 600; }
+.stepper { display:flex; background:#f1f5f9; border-radius:10px; overflow:hidden;
+    border:1px solid #e2e8f0; margin-bottom:20px; }
+.step { flex:1; padding:9px 6px; text-align:center; font-size:12px; font-weight:500;
+    color:#94a3b8; border-right:1px solid #e2e8f0; }
+.step:last-child { border-right:none; }
+.step.active { background:#2563EB; color:#fff; font-weight:700; }
+.step.done { background:#f0fdf4; color:#16a34a; font-weight:600; }
 
-/* ── Panels ── */
-.panel-label {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: #64748b;
-    margin-bottom: 12px;
-}
+.section-label { font-size:10px; font-weight:700; text-transform:uppercase;
+    letter-spacing:1px; color:#64748b; margin-bottom:6px; }
 
-/* ── Defaults sprint ── */
-.defaults-bar {
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-    border-radius: 10px;
-    padding: 12px 16px;
-    margin-bottom: 16px;
-}
+.pbi-card-head { display:flex; align-items:center; justify-content:space-between;
+    background:#0f172a; padding:10px 14px; border-radius:8px 8px 0 0; }
+.pbi-card-title { color:#f8fafc; font-size:13px; font-weight:600; flex:1; margin-right:10px; line-height:1.3; }
+.pbi-card-badge { background:#1e293b; color:#94a3b8; border-radius:4px;
+    padding:2px 8px; font-size:11px; font-family:'IBM Plex Mono',monospace; flex-shrink:0; }
+.pushed-badge { background:#064e3b; color:#6ee7b7; border-radius:4px;
+    padding:2px 8px; font-size:11px; font-weight:700; margin-left:6px; flex-shrink:0; }
 
-/* ── PBI cards ── */
-.pbi-card-header {
-    background: #0f172a;
-    color: white;
-    padding: 10px 16px;
-    border-radius: 8px 8px 0 0;
-    font-size: 13px;
-    font-weight: 600;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-.pbi-section {
-    border-left: 3px solid #2563EB;
-    padding: 8px 12px;
-    margin: 8px 0;
-    background: #f8fafc;
-    border-radius: 0 6px 6px 0;
-}
-.pbi-section-ac {
-    border-left: 3px solid #10b981;
-    padding: 8px 12px;
-    margin: 8px 0;
-    background: #f0fdf4;
-    border-radius: 0 6px 6px 0;
-}
-.pbi-section-val {
-    border-left: 3px solid #f59e0b;
-    padding: 8px 12px;
-    margin: 8px 0;
-    background: #fffbeb;
-    border-radius: 0 6px 6px 0;
-}
-.pbi-section-err {
-    border-left: 3px solid #ef4444;
-    padding: 8px 12px;
-    margin: 8px 0;
-    background: #fef2f2;
-    border-radius: 0 6px 6px 0;
-}
-.section-title {
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .8px;
-    margin-bottom: 6px;
-}
+.pbi-us { border-left:3px solid #2563EB; background:#f8fafc; padding:10px 14px; border-radius:0 6px 6px 0; margin:6px 0; }
+.pbi-ac { border-left:3px solid #10b981; background:#f0fdf4; padding:10px 14px; border-radius:0 6px 6px 0; margin:6px 0; }
+.pbi-val { border-left:3px solid #f59e0b; background:#fffbeb; padding:10px 14px; border-radius:0 6px 6px 0; margin:6px 0; }
+.pbi-err { border-left:3px solid #ef4444; background:#fef2f2; padding:10px 14px; border-radius:0 6px 6px 0; margin:6px 0; }
+.block-label { font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.8px; margin-bottom:6px; }
 
-/* ── Progress stepper ── */
-.stepper {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    padding: 10px 0;
-}
-.step-done { color: #10b981; font-weight: 600; }
-.step-arrow { color: #94a3b8; }
+.stButton > button[kind="primary"] { background:#2563EB !important; border:none !important;
+    border-radius:8px !important; font-weight:600 !important; font-size:14px !important; }
+.stButton > button[kind="primary"]:hover { background:#1d4ed8 !important; }
 
-/* ── Generate button sticky ── */
-.stButton > button[kind="primary"] {
-    background: #2563EB !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    font-size: 15px !important;
-    padding: 12px !important;
-    transition: background .15s !important;
-}
-.stButton > button[kind="primary"]:hover {
-    background: #1d4ed8 !important;
-}
+.empty-panel { min-height:420px; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; border:2px dashed #e2e8f0;
+    border-radius:16px; padding:48px; text-align:center; color:#94a3b8; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Header con badge de estado ──
+# ── Top bar ──
 n_pbis = len(st.session_state.get("result", {}).get("pbis", []))
 module_badge = st.session_state.get("_last_module", "—")
 sprint_badge = st.session_state.get("default_iteration", "—")
+pushed_count = sum(1 for k in st.session_state if k.startswith("pushed_"))
 
 st.markdown(f"""
-<div class="pbi-header">
-  <div class="pbi-header-left">
+<div class="topbar">
+  <div style="display:flex;align-items:center;gap:12px;">
     <h1>📋 Generador de PBIs</h1>
-    <p>Describe la funcionalidad → genera, edita y copia PBIs para Azure DevOps</p>
+    <span class="topbar-sub">Describe → Genera → Empuja a Azure</span>
   </div>
-  <div class="pbi-badge">
-    PBIs: <span>{n_pbis}</span>
-    &nbsp;·&nbsp; Módulo: <span>{module_badge}</span>
-    &nbsp;·&nbsp; Sprint: <span>{sprint_badge}</span>
+  <div class="topbar-badges">
+    <div class="tbadge">PBIs <b>{n_pbis}</b></div>
+    <div class="tbadge">Pusheados <b>{pushed_count}</b></div>
+    <div class="tbadge">Módulo <b>{module_badge}</b></div>
+    <div class="tbadge">Sprint <b>{sprint_badge}</b></div>
   </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── Layout dos columnas: formulario | resultados ──
+# ── Layout ──
 col_form, col_results = st.columns([5, 7], gap="large")
 
 with col_form:
-    st.markdown('<div class="panel-label">⚙️ Configuración del PBI</div>', unsafe_allow_html=True)
+    # Stepper
+    has_desc = bool(st.session_state.get("desc_input", ""))
+    has_result = "result" in st.session_state
+    s1 = "done" if has_desc else "active"
+    s2 = "done" if has_result else ("active" if has_desc else "")
+    s3 = "active" if has_result else ""
+    st.markdown(f"""
+    <div class="stepper">
+      <div class="step {s1}">{'✓' if s1=='done' else '1'} Describe</div>
+      <div class="step {s2}">{'✓' if s2=='done' else '2'} Genera</div>
+      <div class="step {s3}">3 Push Azure</div>
+    </div>""", unsafe_allow_html=True)
 
-    # Defaults globales de sprint/área
-    with st.container(border=True):
-        st.markdown('<div class="panel-label" style="margin-bottom:8px">🗂️ Valores por defecto para Azure</div>', unsafe_allow_html=True)
+    # ── Settings collapsible ──
+    with st.expander("⚙️ Configuración Azure (valores por defecto)", expanded=False):
         dcol1, dcol2 = st.columns(2)
         with dcol1:
-            default_iteration = st.text_input(
-                "Iteration Path",
-                key="default_iteration",
-                value=st.session_state.get("default_iteration", "SWArea")
-            )
-            default_module = st.selectbox(
-                "Endalia Module",
-                ["Registro y planificación horaria", "Vacaciones y ausencias"],
-                key="default_module"
-            )
+            default_iteration = st.text_input("Iteration Path", key="default_iteration",
+                value=st.session_state.get("default_iteration", "SWArea"))
+            default_module = st.selectbox("Endalia Module",
+                ["Registro y planificación horaria", "Vacaciones y ausencias"], key="default_module")
         with dcol2:
-            default_area = st.text_input(
-                "Area Path",
-                key="default_area",
-                value=st.session_state.get("default_area", "SWArea\\Product\\Core\\CoreProduct1")
-            )
+            default_area = st.text_input("Area Path", key="default_area",
+                value=st.session_state.get("default_area", "SWArea\\Product\\Core\\CoreProduct1"))
             dcol_ms, dcol_va = st.columns(2)
             with dcol_ms:
                 default_microservice = st.selectbox("Microservice", ["Candidate", "Candidate+1"], key="default_microservice")
             with dcol_va:
-                default_value_area = st.selectbox("Value Area", ["Product improvement", "Roadmap", "Operations improvement"], key="default_value_area")
+                default_value_area = st.selectbox("Value Area",
+                    ["Product improvement", "Roadmap", "Operations improvement"], key="default_value_area")
 
         if st.button("🔄 Nuevo PBI — limpiar todo", use_container_width=True):
-            for k in ["result", "desc_value", "figma_images", "uploaded_b64", "last_voice_text", "figma_url", "_last_module", "desc_input"]:
+            for k in ["result", "figma_images", "uploaded_b64", "last_voice_text",
+                      "figma_url", "_last_module", "desc_input"]:
                 st.session_state.pop(k, None)
+            for k in list(st.session_state.keys()):
+                if k.startswith("pushed_"):
+                    del st.session_state[k]
             st.rerun()
 
+    # ── Main form ──
     with st.container(border=True):
         c1, c2 = st.columns(2)
         with c1:
@@ -662,32 +606,39 @@ with col_form:
         with c2:
             feature = st.text_input("Feature", placeholder="Ej: Políticas de V&A")
 
+        # Description with complexity indicator
         description = st.text_area(
             "Descripción funcional *",
             placeholder="Desde algo breve ('quitar validación de suma, cada campo 0-100') hasta una feature completa...",
-            height=150,
-            key="desc_input"
+            height=160, key="desc_input"
         )
+        desc_len = len(description)
+        if desc_len == 0:
+            complexity = ""
+        elif desc_len < 80:
+            complexity = '<span class="complexity-dot active-low"></span><span class="complexity-dot"></span><span class="complexity-dot"></span><span class="complexity-label">Cambio puntual — 1 PBI esperado</span>'
+        elif desc_len < 300:
+            complexity = '<span class="complexity-dot active-mid"></span><span class="complexity-dot active-mid"></span><span class="complexity-dot"></span><span class="complexity-label">Feature media — 1-2 PBIs</span>'
+        else:
+            complexity = '<span class="complexity-dot active-high"></span><span class="complexity-dot active-high"></span><span class="complexity-dot active-high"></span><span class="complexity-label">Feature compleja — 2+ PBIs</span>'
+        st.markdown(f"""
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:-8px;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:4px;">{complexity}</div>
+            <div style="font-size:11px;color:#94a3b8;">{desc_len} caracteres</div>
+        </div>""", unsafe_allow_html=True)
 
         with st.expander("🎤 Dictar con voz"):
-            voice_text = speech_to_text(
-                start_prompt="⏺️ Iniciar grabación",
-                stop_prompt="⏹️ Parar grabación",
-                language="es",
-                use_container_width=True,
-                key="voice_recorder"
-            )
+            voice_text = speech_to_text(start_prompt="⏺️ Iniciar grabación",
+                stop_prompt="⏹️ Parar grabación", language="es",
+                use_container_width=True, key="voice_recorder")
             if voice_text:
                 st.session_state["last_voice_text"] = voice_text
             if st.session_state.get("last_voice_text"):
                 st.markdown("**Texto dictado** — cópialo y pégalo arriba:")
                 st.code(st.session_state["last_voice_text"], language=None)
 
-        context = st.text_area(
-            "Contexto técnico (opcional)",
-            placeholder="Endpoints, dependencias, restricciones...",
-            height=80
-        )
+        context = st.text_area("Contexto técnico (opcional)",
+            placeholder="Endpoints, dependencias, restricciones...", height=70)
 
         st.markdown("**🎨 Prototipo**")
         figma_available = "FIGMA_TOKEN" in st.secrets
@@ -695,11 +646,8 @@ with col_form:
 
         with tab_figma:
             if figma_available:
-                figma_url = st.text_input(
-                    "URL del prototipo",
-                    placeholder="https://www.figma.com/proto/...",
-                    key="figma_url"
-                )
+                figma_url = st.text_input("URL del prototipo",
+                    placeholder="https://www.figma.com/proto/...", key="figma_url")
                 if figma_url:
                     file_key, node_ids = parse_figma_url(figma_url)
                     if file_key:
@@ -733,11 +681,8 @@ with col_form:
                 st.info("Añade `FIGMA_TOKEN` en Secrets para conectar con Figma.")
 
         with tab_upload:
-            uploaded_files = st.file_uploader(
-                "Sube capturas",
-                type=["png", "jpg", "jpeg", "webp"],
-                accept_multiple_files=True,
-            )
+            uploaded_files = st.file_uploader("Sube capturas",
+                type=["png", "jpg", "jpeg", "webp"], accept_multiple_files=True)
             if uploaded_files:
                 cols = st.columns(min(len(uploaded_files), 4))
                 for i, f in enumerate(uploaded_files):
@@ -775,6 +720,7 @@ if generate_btn:
                 try:
                     result = generate_pbis(module, feature, description, context, all_images)
                     st.session_state["result"] = result
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Error al generar: {e}")
 
@@ -786,35 +732,35 @@ with col_results:
         result = st.session_state["result"]
         n = len(result["pbis"])
 
-        # Header de resultados con badge
-        st.markdown(f"""
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-            <div style="font-size:18px;font-weight:700;color:#0f172a;">
-                PBIs generados
-            </div>
-            <div style="background:#2563EB;color:white;border-radius:20px;padding:4px 14px;font-size:13px;font-weight:600;">
-                {n} PBI{'s' if n != 1 else ''}
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        rc1, rc2 = st.columns([6, 2])
+        with rc1:
+            st.markdown(f"<div style='font-size:17px;font-weight:700;color:#0f172a;'>PBIs generados</div>", unsafe_allow_html=True)
+        with rc2:
+            st.markdown(f"<div style='background:#2563EB;color:white;border-radius:20px;padding:4px 14px;font-size:13px;font-weight:600;text-align:center;'>{n} PBI{'s' if n!=1 else ''}</div>", unsafe_allow_html=True)
 
         if result.get("summary"):
             st.info(f"💡 {result['summary']}")
 
         for i, pbi in enumerate(result["pbis"]):
-            with st.expander(f"US {i+1}/{n} — {pbi['title']}", expanded=True):
+            with st.expander(f"{'✅ ' if st.session_state.get(f'pushed_{i}') else ''}US {i+1}/{n} — {pbi['title']}", expanded=True):
                 render_pbi_card(pbi, i, n,
-                                default_iteration=st.session_state.get("default_iteration", ""),
-                                default_area=st.session_state.get("default_area", ""),
-                                default_module=st.session_state.get("default_module", "Registro y planificación horaria"),
-                                default_microservice=st.session_state.get("default_microservice", "Candidate"),
-                                default_value_area=st.session_state.get("default_value_area", "Product improvement"))
+                    default_iteration=st.session_state.get("default_iteration", ""),
+                    default_area=st.session_state.get("default_area", ""),
+                    default_module=st.session_state.get("default_module", "Registro y planificación horaria"),
+                    default_microservice=st.session_state.get("default_microservice", "Candidate"),
+                    default_value_area=st.session_state.get("default_value_area", "Product improvement"))
     else:
         st.markdown("""
-        <div style="height:300px;display:flex;flex-direction:column;align-items:center;justify-content:center;
-                    color:#94a3b8;border:2px dashed #e2e8f0;border-radius:12px;text-align:center;padding:32px;">
-            <div style="font-size:40px;margin-bottom:12px;">📋</div>
-            <div style="font-size:15px;font-weight:600;color:#64748b;">Aquí aparecerán los PBIs</div>
-            <div style="font-size:13px;margin-top:6px;">Rellena el formulario y pulsa Generar</div>
+        <div class="empty-panel">
+            <div style="font-size:48px;margin-bottom:16px;">📋</div>
+            <div style="font-size:16px;font-weight:700;color:#475569;margin-bottom:8px;">Aquí aparecerán tus PBIs</div>
+            <div style="font-size:13px;max-width:240px;line-height:1.6;">
+                Describe la funcionalidad en el formulario y pulsa <b>Generar PBIs</b>
+            </div>
+            <div style="margin-top:24px;display:flex;gap:16px;font-size:12px;color:#94a3b8;">
+                <span>✍️ Texto libre</span>
+                <span>🖼️ Capturas Figma</span>
+                <span>🎤 Dictado</span>
+            </div>
         </div>
         """, unsafe_allow_html=True)
