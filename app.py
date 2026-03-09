@@ -95,6 +95,12 @@ def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, 
             patch.append({"op": "replace", "path": "/fields/System.IterationPath", "value": iteration_path})
         if area_path:
             patch.append({"op": "replace", "path": "/fields/System.AreaPath", "value": area_path})
+        if endalia_module:
+            patch.append({"op": "replace", "path": "/fields/Custom.EndaliaModule", "value": endalia_module})
+        if microservice:
+            patch.append({"op": "replace", "path": "/fields/Custom.MicroserviceVersion", "value": microservice})
+        if value_area:
+            patch.append({"op": "replace", "path": "/fields/Microsoft.VSTS.Common.ValueArea", "value": value_area})
         patch_ops = [JsonPatchOperation(**p) for p in patch]
         return wit_client.update_work_item(document=patch_ops, id=existing_id, project=project)
     else:
