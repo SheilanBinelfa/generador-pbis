@@ -284,13 +284,23 @@ def generate_pbis(module, feature, description, context, images):
         user_content.append({"type": "image", "source": {"type": "base64", "media_type": img["media_type"], "data": img["data"]}})
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
-        max_tokens=4096,
+        max_tokens=16000,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_content}]
     )
     raw = "".join(block.text for block in response.content if block.type == "text")
+    # Clean markdown fences and control characters
     clean = raw.replace("```json", "").replace("```", "").strip()
-    return json.loads(clean)
+    # Remove control chars that break JSON parsing
+    clean = re.sub(r'[--]', '', clean)
+    try:
+        return json.loads(clean)
+    except json.JSONDecodeError:
+        # Try to extract JSON object if there's extra text around it
+        match = re.search(r'\{.*\}', clean, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        raise
 
 
 # ========== PBI CARD ==========
