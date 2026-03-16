@@ -676,14 +676,15 @@ with col_form:
         else:
             st.caption(f"🔴 Feature compleja — 2+ PBIs · {desc_len} caracteres")
 
-        with st.expander("🎤 Dictar con voz"):
+        with st.container():
+            st.markdown('<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#64748b;margin-bottom:4px;">🎤 Dictar con voz</div>', unsafe_allow_html=True)
             voice_text = speech_to_text(start_prompt="⏺️ Iniciar grabación",
                 stop_prompt="⏹️ Parar grabación", language="es",
                 use_container_width=True, key="voice_recorder")
             if voice_text:
                 st.session_state["last_voice_text"] = voice_text
             if st.session_state.get("last_voice_text"):
-                st.markdown("**Texto dictado** — cópialo y pégalo arriba:")
+                st.caption("Texto dictado — cópialo y pégalo en la descripción:")
                 st.code(st.session_state["last_voice_text"], language=None)
 
         context = st.text_area("Contexto técnico (opcional)",
