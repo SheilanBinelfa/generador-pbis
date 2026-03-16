@@ -210,7 +210,15 @@ def _build_pbi_html_body(p):
     return h
 
 
-def pbi_to_html(p, figma_images_b64=None, figma_link=None):
+@st.cache_data(show_spinner=False)
+def pbi_to_html_cached(pbi_json, figma_b64_tuple, figma_link):
+    """Cached version - takes hashable args."""
+    import json as _j
+    p = _j.loads(pbi_json)
+    figma_images_b64 = list(figma_b64_tuple) if figma_b64_tuple else None
+    return _pbi_to_html_inner(p, figma_images_b64, figma_link)
+
+def _pbi_to_html_inner(p, figma_images_b64=None, figma_link=None):
     h = _build_pbi_html_body(p)
     h += "<h3>🖼️ Prototipo</h3>"
     if figma_link:
@@ -314,7 +322,16 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
     if "uploaded_b64" in st.session_state:
         figma_b64.extend(st.session_state["uploaded_b64"])
 
-    html_content = pbi_to_html(pbi, figma_b64, figma_link)
+    # Use cached version to avoid recomputing on every rerun
+    import json as _j
+    try:
+        html_content = pbi_to_html_cached(
+            _j.dumps(pbi, ensure_ascii=False),
+            tuple(figma_b64) if figma_b64 else (),
+            figma_link or ""
+        )
+    except Exception:
+        html_content = pbi_to_html(pbi, figma_b64, figma_link)
     pushed_key = f"pushed_{idx}"
 
     # ── Card header ──
@@ -436,38 +453,27 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                         except Exception as e:
                             st.error(f"Error: {e}")
 
-    # ── Editable fields with visual sections ──
-    st.markdown('<div style="padding:12px 0 0 0;">', unsafe_allow_html=True)
-
     pbi["objective"] = st.text_input("🎯 Objetivo", pbi["objective"], key=f"obj_{idx}")
 
-    st.markdown('<div class="pbi-us-block">', unsafe_allow_html=True)
-    st.markdown('<div class="pbi-section-title" style="color:#1d4ed8;">👤 Historia de Usuario</div>', unsafe_allow_html=True)
+    st.markdown("**👤 Historia de Usuario**")
     pbi["role"] = st.text_input("Como", pbi["role"], key=f"role_{idx}", label_visibility="collapsed")
     pbi["when"] = st.text_input("Cuando", pbi["when"], key=f"when_{idx}", label_visibility="collapsed")
     pbi["then"] = st.text_input("Entonces", pbi["then"], key=f"then_{idx}", label_visibility="collapsed")
     pbi["benefit"] = st.text_input("Para", pbi["benefit"], key=f"ben_{idx}", label_visibility="collapsed")
-    st.markdown('</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="pbi-ac-block">', unsafe_allow_html=True)
-    st.markdown('<div class="pbi-section-title" style="color:#15803d;">✅ Happy Path</div>', unsafe_allow_html=True)
+    st.markdown("**✅ Happy Path**")
     for i, ac in enumerate(pbi.get("happy_path", [])):
         pbi["happy_path"][i] = st.text_input(f"AC{i+1}", ac, key=f"hp_{idx}_{i}", label_visibility="collapsed")
-    st.markdown('</div>', unsafe_allow_html=True)
 
     if pbi.get("validations"):
-        st.markdown('<div class="pbi-val-block">', unsafe_allow_html=True)
-        st.markdown('<div class="pbi-section-title" style="color:#b45309;">⚠️ Validaciones</div>', unsafe_allow_html=True)
+        st.markdown("**⚠️ Validaciones**")
         for i, v in enumerate(pbi["validations"]):
             pbi["validations"][i] = st.text_input(f"V{i+1}", v, key=f"v_{idx}_{i}", label_visibility="collapsed")
-        st.markdown('</div>', unsafe_allow_html=True)
 
     if pbi.get("error_states"):
-        st.markdown('<div class="pbi-err-block">', unsafe_allow_html=True)
-        st.markdown('<div class="pbi-section-title" style="color:#b91c1c;">🚨 Estados de Error</div>', unsafe_allow_html=True)
+        st.markdown("**🚨 Estados de Error**")
         for i, e in enumerate(pbi["error_states"]):
             pbi["error_states"][i] = st.text_input(f"E{i+1}", e, key=f"e_{idx}_{i}", label_visibility="collapsed")
-        st.markdown('</div>', unsafe_allow_html=True)
 
     if pbi.get("prototype_refs") or "figma_images" in st.session_state or "uploaded_b64" in st.session_state:
         st.markdown("**🖼️ Prototipo**")
@@ -492,7 +498,6 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
         for i, n in enumerate(pbi["tech_notes"]):
             pbi["tech_notes"][i] = st.text_input(f"N{i+1}", n, key=f"tn_{idx}_{i}", label_visibility="collapsed")
 
-    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ========== MAIN UI ==========
@@ -608,15 +613,17 @@ with col_form:
     # Stepper
     has_desc = bool(st.session_state.get("desc_input", ""))
     has_result = "result" in st.session_state
+    step1 = "✓ Describe" if has_desc else "1 · Describe"
+    step2 = "✓ Genera" if has_result else ("2 · Genera" if has_desc else "2 · Genera")
+    step3 = "3 · Push Azure"
     s1 = "done" if has_desc else "active"
     s2 = "done" if has_result else ("active" if has_desc else "")
     s3 = "active" if has_result else ""
-    st.markdown(f"""
-    <div class="stepper">
-      <div class="step {s1}">{'✓' if s1=='done' else '1'} Describe</div>
-      <div class="step {s2}">{'✓' if s2=='done' else '2'} Genera</div>
-      <div class="step {s3}">3 Push Azure</div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(f'''<div class="stepper">
+      <div class="step {s1}">{step1}</div>
+      <div class="step {s2}">{step2}</div>
+      <div class="step {s3}">{step3}</div>
+    </div>''', unsafe_allow_html=True)
 
     # ── Settings collapsible ──
     with st.expander("⚙️ Configuración Azure (valores por defecto)", expanded=False):
@@ -661,18 +668,13 @@ with col_form:
         )
         desc_len = len(description)
         if desc_len == 0:
-            complexity = ""
+            st.caption("")
         elif desc_len < 80:
-            complexity = '<span class="complexity-dot active-low"></span><span class="complexity-dot"></span><span class="complexity-dot"></span><span class="complexity-label">Cambio puntual — 1 PBI esperado</span>'
+            st.caption(f"🟢 Cambio puntual — 1 PBI esperado · {desc_len} caracteres")
         elif desc_len < 300:
-            complexity = '<span class="complexity-dot active-mid"></span><span class="complexity-dot active-mid"></span><span class="complexity-dot"></span><span class="complexity-label">Feature media — 1-2 PBIs</span>'
+            st.caption(f"🟡 Feature media — 1-2 PBIs · {desc_len} caracteres")
         else:
-            complexity = '<span class="complexity-dot active-high"></span><span class="complexity-dot active-high"></span><span class="complexity-dot active-high"></span><span class="complexity-label">Feature compleja — 2+ PBIs</span>'
-        st.markdown(f"""
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:-8px;margin-bottom:8px;">
-            <div style="display:flex;align-items:center;gap:4px;">{complexity}</div>
-            <div style="font-size:11px;color:#94a3b8;">{desc_len} caracteres</div>
-        </div>""", unsafe_allow_html=True)
+            st.caption(f"🔴 Feature compleja — 2+ PBIs · {desc_len} caracteres")
 
         with st.expander("🎤 Dictar con voz"):
             voice_text = speech_to_text(start_prompt="⏺️ Iniciar grabación",
