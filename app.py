@@ -428,7 +428,12 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                 if st.button(btn_label, key=f"push_{idx}", type="primary", use_container_width=True):
                     with st.spinner("Enviando a Azure DevOps..."):
                         try:
-                            parent_id = int(parent) if parent and parent.strip() else None
+                            # Accept full Azure URL or bare ID
+                            parent_id = None
+                            if parent and parent.strip():
+                                id_match = re.search(r'(\d+)/?$', parent.strip())
+                                if id_match:
+                                    parent_id = int(id_match.group(1))
                             result = push_pbi_to_azure(pbi,
                                 iteration_path=iteration if iteration.strip() else None,
                                 area_path=area if area.strip() else None,
