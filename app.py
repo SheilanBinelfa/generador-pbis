@@ -313,6 +313,7 @@ def generate_pbis(module, feature, description, context, images):
 
 # ========== PBI CARD ==========
 
+@st.fragment
 def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", default_module="", default_microservice="", default_value_area=""):
     import json as _json
     figma_b64 = []
@@ -322,16 +323,22 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
     if "uploaded_b64" in st.session_state:
         figma_b64.extend(st.session_state["uploaded_b64"])
 
-    # Use cached version to avoid recomputing on every rerun
     import json as _j
-    try:
-        html_content = pbi_to_html_cached(
-            _j.dumps(pbi, ensure_ascii=False),
-            tuple(figma_b64) if figma_b64 else (),
-            figma_link or ""
-        )
-    except Exception:
-        html_content = pbi_to_html(pbi, figma_b64, figma_link)
+    _cache_key = f"_html_{idx}"
+    _pbi_hash = hash(_j.dumps(pbi, sort_keys=True, ensure_ascii=False))
+    if st.session_state.get(f"_html_hash_{idx}") != _pbi_hash:
+        try:
+            html_content = pbi_to_html_cached(
+                _j.dumps(pbi, ensure_ascii=False),
+                tuple(figma_b64) if figma_b64 else (),
+                figma_link or ""
+            )
+        except Exception:
+            html_content = pbi_to_html(pbi, figma_b64, figma_link)
+        st.session_state[_cache_key] = html_content
+        st.session_state[f"_html_hash_{idx}"] = _pbi_hash
+    else:
+        html_content = st.session_state.get(_cache_key, "")
     pushed_key = f"pushed_{idx}"
 
     # ── Card header ──
@@ -661,9 +668,9 @@ with col_form:
     with st.container(border=True):
         c1, c2 = st.columns(2)
         with c1:
-            module = st.text_input("Módulo", placeholder="Ej: Holidays & Absences")
+            module = st.text_input("Módulo", placeholder="Ej: Holidays & Absences", key="module_input")
         with c2:
-            feature = st.text_input("Feature", placeholder="Ej: Políticas de V&A")
+            feature = st.text_input("Feature", placeholder="Ej: Políticas de V&A", key="feature_input")
 
         # Description with complexity indicator
         description = st.text_area(
@@ -693,7 +700,7 @@ with col_form:
                 st.code(st.session_state["last_voice_text"], language=None)
 
         context = st.text_area("Contexto técnico (opcional)",
-            placeholder="Endpoints, dependencias, restricciones...", height=70)
+            placeholder="Endpoints, dependencias, restricciones...", height=70, key="context_input")
 
         st.markdown("**🎨 Prototipo**")
         figma_available = "FIGMA_TOKEN" in st.secrets
@@ -754,6 +761,9 @@ uploaded_files = uploaded_files if 'uploaded_files' in dir() else []
 
 if generate_btn:
     description = st.session_state.get("desc_input", "")
+    module = st.session_state.get("module_input", "")
+    feature = st.session_state.get("feature_input", "")
+    context = st.session_state.get("context_input", "")
     if not description.strip():
         with col_form:
             st.error("Añade una descripción funcional")
