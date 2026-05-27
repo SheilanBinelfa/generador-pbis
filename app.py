@@ -112,6 +112,38 @@ def get_project():
     return st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
 
 @st.cache_data(show_spinner=False, ttl=300)
+def fetch_iterations(pat, org, project, team="CoreProduct1"):
+    """Fetch sprint iterations under PRODUCT from Azure DevOps team settings."""
+    try:
+        # Get team iterations (only the ones assigned to this team)
+        for team_name in [team, f"{team} Team"]:
+            team_enc = requests.utils.quote(team_name)
+            url = f"https://dev.azure.com/{org}/{project}/{team_enc}/_apis/work/teamsettings/iterations?api-version=7.1"
+            resp = requests.get(url, auth=("", pat), timeout=10)
+            if resp.status_code == 200:
+                iterations = resp.json().get("value", [])
+                result = []
+                for it in iterations:
+                    path = it.get("path", "")
+                    name = it.get("name", "")
+                    # Only include PRODUCT sprints (not LEGACY or root)
+                    if "PRODUCT" in path:
+                        # Show only from PRODUCT onward for readability
+                        short = path.split("PRODUCT")[-1].lstrip("\\")
+                        label = f"PRODUCT\\{short}" if short else name
+                        result.append({
+                            "label": label,
+                            "path": path,
+                            "name": name,
+                            "id": it.get("id", "")
+                        })
+                if result:
+                    return result
+        return []
+    except Exception:
+        return []
+
+@st.cache_data(show_spinner=False, ttl=300)
 def fetch_area_paths(pat, org, project):
     """Fetch only SWArea\\Product\\Core\\CoreProductN paths."""
     try:
@@ -609,10 +641,10 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                 c1, c2 = st.columns(2)
                 with c1:
                     iteration = st.text_input("Iteration Path", value=default_iteration, key=f"iter_{idx}")
-                    endalia_module = st.selectbox("Endalia Module",
-                        ["Registro y planificación horaria", "Vacaciones y ausencias"],
-                        index=0 if default_module not in ["Registro y planificación horaria","Vacaciones y ausencias"]
-                              else ["Registro y planificación horaria","Vacaciones y ausencias"].index(default_module),
+                    _modal_modules = st.session_state.get("_fetched_modules") or ["Registro y planificación horaria", "Vacaciones y ausencias"]
+                    _emod_default = default_module if default_module in _modal_modules else _modal_modules[0]
+                    endalia_module = st.selectbox("Endalia Module", _modal_modules,
+                        index=_modal_modules.index(_emod_default),
                         key=f"emodule_{idx}")
                     value_area = st.selectbox("Value Area",
                         ["Product improvement", "Roadmap", "Operations improvement"],
@@ -643,10 +675,14 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                         _iteration = st.session_state.get("default_iteration", "")
                         # Try sprint capacity first (most accurate), fallback to team members
                         _members = []
-                        if _team and _iteration:
+                        if _team and _iteration and _iteration != "SWArea":
                             _members = fetch_sprint_members(_pat, _org, _proj, _team, _iteration)
                         if not _members and _team:
-                            _members = fetch_team_members(_pat, _org, _proj, team=_team)
+                            # Try with "Team" suffix variants
+                            for _t in [_team, f"{_team} Team"]:
+                                _members = fetch_team_members(_pat, _org, _proj, team=_t)
+                                if _members:
+                                    break
                         _member_names = ["— Sin asignar —"] + [m["name"] for m in _members]
                         _member_map = {"— Sin asignar —": ""} | {m["name"]: m["uniqueName"] for m in _members}
 
@@ -981,11 +1017,28 @@ with col_form:
         _modules = fetch_modules(_pat, _org, _proj)
         if not _modules:
             _modules = ["Registro y planificación horaria", "Vacaciones y ausencias"]
+        st.session_state["_fetched_modules"] = _modules
 
         dcol1, dcol2 = st.columns(2)
         with dcol1:
-            default_iteration = st.text_input("Iteration Path", key="default_iteration",
-                value=st.session_state.get("default_iteration", "SWArea"))
+            _team_for_iter = st.session_state.get("user_team", "CoreProduct1")
+            _iterations = fetch_iterations(_pat, _org, _proj, team=_team_for_iter)
+            if _iterations:
+                _iter_labels = [i["label"] for i in _iterations]
+                _iter_paths = [i["path"] for i in _iterations]
+                _saved_path = st.session_state.get("default_iteration", "")
+                _iter_idx = _iter_paths.index(_saved_path) if _saved_path in _iter_paths else max(0, len(_iter_paths)-1)
+                _selected_iter = st.selectbox("Sprint (Iteration)", _iter_labels,
+                    index=_iter_idx, key="default_iteration_label",
+                    help="Sprints de PRODUCT asignados a tu equipo")
+                # Store full path for Azure API calls
+                _sel_idx = _iter_labels.index(_selected_iter)
+                default_iteration = _iter_paths[_sel_idx]
+                st.session_state["default_iteration"] = default_iteration
+            else:
+                default_iteration = st.text_input("Iteration Path", key="default_iteration",
+                    value=st.session_state.get("default_iteration", "SWArea"),
+                    help="No se pudieron cargar los sprints. Escribe la ruta completa.")
             _module_idx = 0
             if st.session_state.get("default_module") in _modules:
                 _module_idx = _modules.index(st.session_state["default_module"])
