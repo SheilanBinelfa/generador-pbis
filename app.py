@@ -213,36 +213,46 @@ def fetch_modules(pat, org, project):
 
 @st.cache_data(show_spinner=False, ttl=300)
 def fetch_sprint_members(pat, org, project, team, iteration_path):
-    """Fetch team members with capacity for a specific sprint."""
-    import os as _os
-    SEP = _os.sep if _os.sep == chr(92) else chr(92)
-    SEP = chr(92)
+    """Fetch capacity members. Uses current sprint if iteration_path matches, else searches all."""
     try:
         for team_name in [team, team + " Team"]:
             team_enc = requests.utils.quote(team_name)
-            url_iters = f"https://dev.azure.com/{org}/{project}/{team_enc}/_apis/work/teamsettings/iterations?api-version=7.1"
-            resp = requests.get(url_iters, auth=("", pat), timeout=10)
-            if resp.status_code != 200:
+            base = f"https://dev.azure.com/{org}/{project}/{team_enc}/_apis/work/teamsettings/iterations"
+
+            # Try current sprint first (fastest)
+            resp_cur = requests.get(base + "?$timeframe=current&api-version=7.1",
+                                    auth=("", pat), timeout=10)
+            iter_id = None
+            if resp_cur.status_code == 200:
+                cur_iters = resp_cur.json().get("value", [])
+                if cur_iters:
+                    cur = cur_iters[0]
+                    # Check if this is the selected sprint
+                    cur_name = cur.get("name", "")
+                    last_seg = iteration_path.split(chr(92))[-1]
+                    if cur_name == last_seg or last_seg in cur.get("path", ""):
+                        iter_id = cur["id"]
+
+            # If not current, search all iterations
+            if not iter_id:
+                resp_all = requests.get(base + "?api-version=7.1",
+                                        auth=("", pat), timeout=10)
+                if resp_all.status_code == 200:
+                    last_seg = iteration_path.split(chr(92))[-1]
+                    for it in resp_all.json().get("value", []):
+                        if it.get("name", "") == last_seg:
+                            iter_id = it["id"]
+                            break
+
+            if not iter_id:
                 continue
-            iterations = resp.json().get("value", [])
-            if not iterations:
-                continue
-            last_seg = iteration_path.split(SEP)[-1]
-            matched = None
-            for it in iterations:
-                it_path = it.get("path", "")
-                it_name = it.get("name", "")
-                if it_path == iteration_path or it_name == last_seg or last_seg in it_path:
-                    matched = it
-                    break
-            if not matched:
-                continue
-            iter_id = matched["id"]
-            url_cap = (f"https://dev.azure.com/{org}/{project}/{team_enc}"
-                       f"/_apis/work/teamsettings/iterations/{iter_id}/capacities?api-version=7.1")
+
+            # Fetch capacities
+            url_cap = f"{base}/{iter_id}/capacities?api-version=7.1"
             resp2 = requests.get(url_cap, auth=("", pat), timeout=10)
             if resp2.status_code != 200:
                 continue
+
             members = []
             for entry in resp2.json().get("value", []):
                 identity = entry.get("teamMember", {})
