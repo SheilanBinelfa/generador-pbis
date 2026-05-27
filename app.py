@@ -1105,9 +1105,10 @@ with col_form:
     with st.container(border=True):
         c1, c2 = st.columns(2)
         with c1:
-            module = st.text_input("Módulo", placeholder="Ej: Holidays & Absences", key="module_input")
+            module = st.text_input("Título — parte 1", placeholder="Ej: Time, Mobile, Holidays...", key="module_input")
         with c2:
-            feature = st.text_input("Feature", placeholder="Ej: Políticas de V&A", key="feature_input")
+            feature = st.text_input("Título — parte 2", placeholder="Ej: Reports, Solicitudes, Configuración...", key="feature_input")
+        st.caption("Claude completará el título con la acción concreta según tu descripción")
 
         # Description with complexity indicator
         description = st.text_area(
