@@ -113,25 +113,36 @@ def get_project():
 
 @st.cache_data(show_spinner=False, ttl=300)
 def fetch_area_paths(pat, org, project):
-    """Fetch only CoreProductN area paths from Azure DevOps."""
+    """Fetch only SWArea\\Product\\Core\\CoreProductN paths."""
     try:
         url = f"https://dev.azure.com/{org}/{project}/_apis/wit/classificationnodes/areas?$depth=10&api-version=7.1"
         resp = requests.get(url, auth=("", pat), timeout=10)
         if resp.status_code != 200:
             return []
-        def extract_paths(node, prefix=""):
-            path = f"{prefix}\\{node['name']}" if prefix else node['name']
-            paths = [path]
-            for child in node.get('children', []):
-                paths.extend(extract_paths(child, path))
-            return paths
-        all_paths = extract_paths(resp.json())
-        # Only direct CoreProductN children — no Squads or deeper
-        import re as _re
-        filtered = [p for p in all_paths
-                    if _re.search(r'CoreProduct\d+$', p)
-                    and p.count('\\') == 3]
-        return sorted(filtered) if filtered else []
+
+        def find_node(node, name):
+            if node.get("name") == name:
+                return node
+            for child in node.get("children", []):
+                result = find_node(child, name)
+                if result:
+                    return result
+            return None
+
+        root = resp.json()
+        # Navigate: root -> SWArea -> Product -> Core -> CoreProductN
+        swarea = find_node(root, "SWArea") or root
+        product = find_node(swarea, "Product")
+        core = find_node(product, "Core") if product else None
+        if core:
+            import re as _re
+            paths = []
+            for child in core.get("children", []):
+                name = child.get("name", "")
+                if _re.match(r"CoreProduct\d+$", name):
+                    paths.append(f"SWArea\\Product\\Core\\{name}")
+            return sorted(paths)
+        return []
     except Exception:
         return []
 
@@ -165,6 +176,51 @@ def fetch_modules(pat, org, project):
                     if vals:
                         return sorted(vals)
         return []
+    except Exception:
+        return []
+
+@st.cache_data(show_spinner=False, ttl=300)
+def fetch_sprint_members(pat, org, project, team, iteration_path):
+    """Fetch team members with capacity in a specific sprint."""
+    try:
+        # Convert iteration path to sprint name for the API
+        # e.g. "SWArea\2025\IT7" -> need to find the iteration ID first
+        # Step 1: get team iterations to find the matching one
+        team_enc = requests.utils.quote(team)
+        url_iters = f"https://dev.azure.com/{org}/{project}/{team_enc}/_apis/work/teamsettings/iterations?api-version=7.1"
+        resp = requests.get(url_iters, auth=("", pat), timeout=10)
+        if resp.status_code != 200:
+            return []
+
+        iterations = resp.json().get("value", [])
+        # Match by path or name
+        sprint_name = iteration_path.split("\\")[-1] if "\\" in iteration_path else iteration_path
+        matched = next(
+            (i for i in iterations if
+             i.get("path","").endswith(sprint_name) or
+             i.get("name","") == sprint_name or
+             i.get("path","") == iteration_path),
+            None
+        )
+        if not matched:
+            return []
+
+        iter_id = matched["id"]
+
+        # Step 2: get capacities for this iteration
+        url_cap = f"https://dev.azure.com/{org}/{project}/{team_enc}/_apis/work/teamsettings/iterations/{iter_id}/capacities?api-version=7.1"
+        resp2 = requests.get(url_cap, auth=("", pat), timeout=10)
+        if resp2.status_code != 200:
+            return []
+
+        members = []
+        for entry in resp2.json().get("value", []):
+            identity = entry.get("teamMember", {})
+            name = identity.get("displayName", "")
+            uid = identity.get("uniqueName", "")
+            if name and not name.startswith("Azure"):
+                members.append({"name": name, "uniqueName": uid})
+        return sorted(members, key=lambda x: x["name"])
     except Exception:
         return []
 
@@ -584,7 +640,13 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                         _org = st.session_state.get("user_org") or st.secrets.get("AZURE_ORG", "")
                         _proj = st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
                         _team = st.session_state.get("user_team") or st.session_state.get("user_team_select", "")
-                        _members = fetch_team_members(_pat, _org, _proj, team=_team) if _team else []
+                        _iteration = st.session_state.get("default_iteration", "")
+                        # Try sprint capacity first (most accurate), fallback to team members
+                        _members = []
+                        if _team and _iteration:
+                            _members = fetch_sprint_members(_pat, _org, _proj, _team, _iteration)
+                        if not _members and _team:
+                            _members = fetch_team_members(_pat, _org, _proj, team=_team)
                         _member_names = ["— Sin asignar —"] + [m["name"] for m in _members]
                         _member_map = {"— Sin asignar —": ""} | {m["name"]: m["uniqueName"] for m in _members}
 
@@ -947,7 +1009,8 @@ with col_form:
         # Team selector
         _teams = fetch_teams(_pat, _org, _proj)
         if _teams:
-            _current_team = st.session_state.get("user_team", _teams[0])
+            _default_team = next((t for t in _teams if t == "CoreProduct1"), _teams[0])
+            _current_team = st.session_state.get("user_team", _default_team)
             _team_idx = _teams.index(_current_team) if _current_team in _teams else 0
             st.session_state["user_team"] = st.selectbox(
                 "Mi equipo", _teams, index=_team_idx, key="user_team_select",
