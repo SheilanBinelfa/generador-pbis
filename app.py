@@ -213,44 +213,36 @@ def fetch_modules(pat, org, project):
 
 @st.cache_data(show_spinner=False, ttl=300)
 def fetch_sprint_members(pat, org, project, team, iteration_path):
-    """Fetch team members with capacity in a specific sprint."""
+    """Fetch team members with capacity for a specific sprint."""
+    import os as _os
+    SEP = _os.sep if _os.sep == chr(92) else chr(92)
+    SEP = chr(92)
     try:
         for team_name in [team, team + " Team"]:
             team_enc = requests.utils.quote(team_name)
-
-            # Step 1: get iterations for this team
             url_iters = f"https://dev.azure.com/{org}/{project}/{team_enc}/_apis/work/teamsettings/iterations?api-version=7.1"
             resp = requests.get(url_iters, auth=("", pat), timeout=10)
             if resp.status_code != 200:
                 continue
-
             iterations = resp.json().get("value", [])
             if not iterations:
                 continue
-
-            # Match by full path or last segment
-            parts = iteration_path.replace("/", "\\").split("\\")
-            last_segment = parts[-1] if parts else iteration_path
-
+            last_seg = iteration_path.split(SEP)[-1]
             matched = None
             for it in iterations:
                 it_path = it.get("path", "")
                 it_name = it.get("name", "")
-                if it_path == iteration_path or it_name == last_segment or it_path.endswith(last_segment):
+                if it_path == iteration_path or it_name == last_seg or last_seg in it_path:
                     matched = it
                     break
-
             if not matched:
                 continue
-
             iter_id = matched["id"]
-
-            # Step 2: get capacities
-            url_cap = f"https://dev.azure.com/{org}/{project}/{team_enc}/_apis/work/teamsettings/iterations/{iter_id}/capacities?api-version=7.1"
+            url_cap = (f"https://dev.azure.com/{org}/{project}/{team_enc}"
+                       f"/_apis/work/teamsettings/iterations/{iter_id}/capacities?api-version=7.1")
             resp2 = requests.get(url_cap, auth=("", pat), timeout=10)
             if resp2.status_code != 200:
                 continue
-
             members = []
             for entry in resp2.json().get("value", []):
                 identity = entry.get("teamMember", {})
@@ -258,13 +250,12 @@ def fetch_sprint_members(pat, org, project, team, iteration_path):
                 uid = identity.get("uniqueName", "")
                 if name and not name.startswith("Azure"):
                     members.append({"name": name, "uniqueName": uid})
-
             if members:
                 return sorted(members, key=lambda x: x["name"])
-
         return []
     except Exception:
         return []
+
 
 @st.cache_data(show_spinner=False, ttl=300)
 def fetch_teams(pat, org, project):
