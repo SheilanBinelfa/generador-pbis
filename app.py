@@ -150,6 +150,43 @@ def fetch_modules(pat, org, project):
     except Exception:
         return []
 
+@st.cache_data(show_spinner=False, ttl=300)
+def fetch_teams(pat, org, project):
+    """Fetch all teams in the project, filtered to Core teams."""
+    try:
+        url = f"https://dev.azure.com/{org}/_apis/projects/{project}/teams?api-version=7.1"
+        resp = requests.get(url, auth=("", pat), timeout=10)
+        if resp.status_code != 200:
+            return []
+        teams = resp.json().get("value", [])
+        # Filter to Core teams (CoreProduct1, CoreProduct2, etc.)
+        core_teams = [t["name"] for t in teams if "Core" in t.get("name", "")]
+        return sorted(core_teams) if core_teams else sorted([t["name"] for t in teams])
+    except Exception:
+        return []
+
+@st.cache_data(show_spinner=False, ttl=300)
+def fetch_team_members(pat, org, project, team="CoreProduct1"):
+    """Fetch team members from Azure DevOps."""
+    try:
+        # Try exact name, then with/without " Team" suffix
+        for team_name in [team, f"{team} Team", team.replace(" Team", "")]:
+            url = f"https://dev.azure.com/{org}/_apis/projects/{project}/teams/{requests.utils.quote(team_name)}/members?api-version=7.1"
+            resp = requests.get(url, auth=("", pat), timeout=10)
+            if resp.status_code == 200:
+                members = resp.json().get("value", [])
+                result = []
+                for m in members:
+                    identity = m.get("identity", {})
+                    name = identity.get("displayName", "")
+                    uid = identity.get("uniqueName", "")
+                    if name and not name.startswith("Azure"):
+                        result.append({"name": name, "uniqueName": uid})
+                return sorted(result, key=lambda x: x["name"])
+        return []
+    except Exception:
+        return []
+
 
 def upload_image_to_azure(wit_client, image_b64, filename, project):
     import io
@@ -221,12 +258,12 @@ def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, 
         return wit_client.create_work_item(document=patch_ops, project=project, type="Product Backlog Item")
 
 
-def create_child_tasks(wit_client, project, pbi_id, task_titles, iteration_path=None, area_path=None):
+def create_child_tasks(wit_client, project, pbi_id, task_titles, iteration_path=None, area_path=None, assignees=None):
     """Create Task work items as children of the given PBI, one per title in task_titles."""
     from azure.devops.v7_1.work_item_tracking.models import JsonPatchOperation
-    org = st.secrets["AZURE_ORG"]
+    org = get_org()
     created = []
-    for title in task_titles:
+    for i, title in enumerate(task_titles):
         patch = [
             {"op": "add", "path": "/fields/System.Title", "value": title or "Task"},
             {"op": "add", "path": "/relations/-", "value": {
@@ -238,6 +275,8 @@ def create_child_tasks(wit_client, project, pbi_id, task_titles, iteration_path=
             patch.append({"op": "add", "path": "/fields/System.IterationPath", "value": iteration_path})
         if area_path:
             patch.append({"op": "add", "path": "/fields/System.AreaPath", "value": area_path})
+        if assignees and i < len(assignees) and assignees[i]:
+            patch.append({"op": "add", "path": "/fields/System.AssignedTo", "value": assignees[i]})
         patch_ops = [JsonPatchOperation(**p) for p in patch]
         task = wit_client.create_work_item(document=patch_ops, project=project, type="Task")
         created.append(task.id)
@@ -519,13 +558,30 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                     create_tasks = st.checkbox("Crear task(s) hija(s) automáticamente", key=f"create_tasks_{idx}")
                     num_tasks = 1
                     task_titles = []
+                    task_assignees = []
                     if create_tasks:
                         num_tasks = st.number_input("¿Cuántas tasks?", min_value=1, max_value=10, value=1, step=1, key=f"num_tasks_{idx}")
-                        st.markdown("**Títulos de las tasks**")
+                        # Load team members
+                        _pat = st.session_state.get("user_pat") or st.secrets.get("AZURE_PAT", "")
+                        _org = st.session_state.get("user_org") or st.secrets.get("AZURE_ORG", "")
+                        _proj = st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
+                        _team = st.session_state.get("user_team") or st.session_state.get("user_team_select", "")
+                        _members = fetch_team_members(_pat, _org, _proj, team=_team) if _team else []
+                        _member_names = ["— Sin asignar —"] + [m["name"] for m in _members]
+                        _member_map = {"— Sin asignar —": ""} | {m["name"]: m["uniqueName"] for m in _members}
+
+                        st.markdown("**Tasks**")
                         for t in range(int(num_tasks)):
-                            title = st.text_input(f"Task {t+1}", value=pbi["title"],
-                                key=f"task_title_{idx}_{t}", label_visibility="collapsed")
-                            task_titles.append(title)
+                            tc1, tc2 = st.columns([3, 2])
+                            with tc1:
+                                title = st.text_input(f"Título task {t+1}", value=pbi["title"],
+                                    key=f"task_title_{idx}_{t}", label_visibility="collapsed")
+                                task_titles.append(title)
+                            with tc2:
+                                selected_name = st.selectbox(f"Asignar a {t+1}",
+                                    _member_names, key=f"task_assignee_{idx}_{t}",
+                                    label_visibility="collapsed")
+                                task_assignees.append(_member_map.get(selected_name, ""))
 
                 btn_label = "✅ Actualizar PBI" if existing_id else "✅ Crear PBI en Azure"
                 if st.button(btn_label, key=f"push_{idx}", type="primary", use_container_width=True):
@@ -544,7 +600,7 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                                 figma_link=figma_link, existing_id=existing_id,
                                 endalia_module=endalia_module, microservice=microservice,
                                 value_area=value_area)
-                            pbi_url = f"https://dev.azure.com/{st.secrets['AZURE_ORG']}/{st.secrets['AZURE_PROJECT']}/_workitems/edit/{result.id}"
+                            pbi_url = f"https://dev.azure.com/{get_org()}/{get_project()}/_workitems/edit/{result.id}"
                             st.success(f"✅ PBI {'actualizado' if existing_id else 'creado'} — **#{result.id}** — [Abrir ↗]({pbi_url})")
                             st.session_state[pushed_key] = result.id
 
@@ -553,10 +609,11 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                                     conn = get_azure_connection()
                                     wit_client = conn.clients.get_work_item_tracking_client()
                                     task_ids = create_child_tasks(wit_client,
-                                        project=st.secrets["AZURE_PROJECT"],
+                                        project=get_project(),
                                         pbi_id=result.id, task_titles=task_titles,
                                         iteration_path=iteration if iteration.strip() else None,
-                                        area_path=area if area.strip() else None)
+                                        area_path=area if area.strip() else None,
+                                        assignees=task_assignees)
                                     st.success(f"✅ {len(task_ids)} task(s) — IDs: {', '.join(f'**{t}**' for t in task_ids)}")
                         except Exception as e:
                             st.error(f"Error: {e}")
@@ -709,15 +766,18 @@ def render_login():
     """, unsafe_allow_html=True)
 
     with st.form("login_form"):
-        org = st.text_input("Organización Azure DevOps",
-            placeholder="endalia",
-            help="El nombre de tu organización en dev.azure.com/[org]")
-        project = st.text_input("Proyecto",
-            placeholder="SWArea",
-            help="El nombre del proyecto en Azure DevOps")
+        lc1, lc2 = st.columns(2)
+        with lc1:
+            org = st.text_input("Organización Azure DevOps",
+                placeholder="endalia",
+                help="El nombre de tu organización en dev.azure.com/[org]")
+        with lc2:
+            project = st.text_input("Proyecto",
+                placeholder="SWArea",
+                help="El nombre del proyecto en Azure DevOps")
         pat = st.text_input("Personal Access Token (PAT)",
             type="password",
-            help="Genera tu PAT en Azure DevOps → User Settings → Personal access tokens")
+            help="Genera tu PAT en Azure DevOps → tu avatar → Personal access tokens → New Token → Work Items: Read & Write")
         submitted = st.form_submit_button("🔑 Conectar", type="primary", use_container_width=True)
 
         if submitted:
@@ -732,6 +792,10 @@ def render_login():
                             st.session_state["user_pat"] = pat.strip()
                             st.session_state["user_org"] = org.strip()
                             st.session_state["user_project"] = project.strip()
+                            # Auto-detect team
+                            teams = fetch_teams(pat.strip(), org.strip(), project.strip())
+                            if len(teams) == 1:
+                                st.session_state["user_team"] = teams[0]
                             st.rerun()
                         elif resp.status_code == 401:
                             st.error("PAT incorrecto o sin permisos. Verifica que tenga acceso a Work Items.")
@@ -861,6 +925,16 @@ with col_form:
                 default_value_area = st.selectbox("Value Area",
                     ["Product improvement", "Roadmap", "Operations improvement"],
                     key="default_value_area")
+
+        # Team selector
+        _teams = fetch_teams(_pat, _org, _proj)
+        if _teams:
+            _current_team = st.session_state.get("user_team", _teams[0])
+            _team_idx = _teams.index(_current_team) if _current_team in _teams else 0
+            st.session_state["user_team"] = st.selectbox(
+                "Mi equipo", _teams, index=_team_idx, key="user_team_select",
+                help="Determina qué miembros aparecen en el selector de asignación de tasks"
+            )
 
         if st.button("🔄 Nuevo PBI — limpiar todo", use_container_width=True):
             for k in ["result", "figma_images", "uploaded_b64", "last_voice_text",
