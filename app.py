@@ -215,44 +215,54 @@ def fetch_modules(pat, org, project):
 def fetch_sprint_members(pat, org, project, team, iteration_path):
     """Fetch team members with capacity in a specific sprint."""
     try:
-        # Convert iteration path to sprint name for the API
-        # e.g. "SWArea\2025\IT7" -> need to find the iteration ID first
-        # Step 1: get team iterations to find the matching one
-        team_enc = requests.utils.quote(team)
-        url_iters = f"https://dev.azure.com/{org}/{project}/{team_enc}/_apis/work/teamsettings/iterations?api-version=7.1"
-        resp = requests.get(url_iters, auth=("", pat), timeout=10)
-        if resp.status_code != 200:
-            return []
+        for team_name in [team, team + " Team"]:
+            team_enc = requests.utils.quote(team_name)
 
-        iterations = resp.json().get("value", [])
-        # Match by path or name
-        sprint_name = iteration_path.split("\\")[-1] if "\\" in iteration_path else iteration_path
-        matched = next(
-            (i for i in iterations if
-             i.get("path","").endswith(sprint_name) or
-             i.get("name","") == sprint_name or
-             i.get("path","") == iteration_path),
-            None
-        )
-        if not matched:
-            return []
+            # Step 1: get iterations for this team
+            url_iters = f"https://dev.azure.com/{org}/{project}/{team_enc}/_apis/work/teamsettings/iterations?api-version=7.1"
+            resp = requests.get(url_iters, auth=("", pat), timeout=10)
+            if resp.status_code != 200:
+                continue
 
-        iter_id = matched["id"]
+            iterations = resp.json().get("value", [])
+            if not iterations:
+                continue
 
-        # Step 2: get capacities for this iteration
-        url_cap = f"https://dev.azure.com/{org}/{project}/{team_enc}/_apis/work/teamsettings/iterations/{iter_id}/capacities?api-version=7.1"
-        resp2 = requests.get(url_cap, auth=("", pat), timeout=10)
-        if resp2.status_code != 200:
-            return []
+            # Match by full path or last segment
+            parts = iteration_path.replace("/", "\\").split("\\")
+            last_segment = parts[-1] if parts else iteration_path
 
-        members = []
-        for entry in resp2.json().get("value", []):
-            identity = entry.get("teamMember", {})
-            name = identity.get("displayName", "")
-            uid = identity.get("uniqueName", "")
-            if name and not name.startswith("Azure"):
-                members.append({"name": name, "uniqueName": uid})
-        return sorted(members, key=lambda x: x["name"])
+            matched = None
+            for it in iterations:
+                it_path = it.get("path", "")
+                it_name = it.get("name", "")
+                if it_path == iteration_path or it_name == last_segment or it_path.endswith(last_segment):
+                    matched = it
+                    break
+
+            if not matched:
+                continue
+
+            iter_id = matched["id"]
+
+            # Step 2: get capacities
+            url_cap = f"https://dev.azure.com/{org}/{project}/{team_enc}/_apis/work/teamsettings/iterations/{iter_id}/capacities?api-version=7.1"
+            resp2 = requests.get(url_cap, auth=("", pat), timeout=10)
+            if resp2.status_code != 200:
+                continue
+
+            members = []
+            for entry in resp2.json().get("value", []):
+                identity = entry.get("teamMember", {})
+                name = identity.get("displayName", "")
+                uid = identity.get("uniqueName", "")
+                if name and not name.startswith("Azure"):
+                    members.append({"name": name, "uniqueName": uid})
+
+            if members:
+                return sorted(members, key=lambda x: x["name"])
+
+        return []
     except Exception:
         return []
 
@@ -265,8 +275,8 @@ def fetch_teams(pat, org, project):
         if resp.status_code != 200:
             return []
         teams = resp.json().get("value", [])
-        # Filter to Core teams (CoreProduct1, CoreProduct2, etc.)
-        core_teams = [t["name"] for t in teams if "Core" in t.get("name", "")]
+        # Filter to CoreProduct teams only (exclude DevsCore and others)
+        core_teams = [t["name"] for t in teams if t.get("name", "").startswith("CoreProduct")]
         return sorted(core_teams) if core_teams else sorted([t["name"] for t in teams])
     except Exception:
         return []
@@ -673,13 +683,25 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                         _proj = st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
                         _team = st.session_state.get("user_team") or st.session_state.get("user_team_select", "")
                         _iteration = st.session_state.get("default_iteration", "")
-                        # Try sprint capacity first (most accurate), fallback to team members
                         _members = []
                         if _team and _iteration and _iteration != "SWArea":
                             _members = fetch_sprint_members(_pat, _org, _proj, _team, _iteration)
+
+                        # Debug expander — remove after confirming it works
+                        with st.expander("🔍 Debug carga de equipo", expanded=not bool(_members)):
+                            st.caption(f"Team: `{_team}` | Iteration: `{_iteration}`")
+                            st.caption(f"Miembros cargados: {len(_members)}")
+                            if not _members:
+                                st.warning("Sin miembros por capacity — probando team members...")
+                                for _t in [_team, _team + " Team"]:
+                                    _fm = fetch_team_members(_pat, _org, _proj, team=_t)
+                                    st.caption(f"fetch_team_members({_t}): {len(_fm)} resultados")
+                                    if _fm:
+                                        _members = _fm
+                                        break
+
                         if not _members and _team:
-                            # Try with "Team" suffix variants
-                            for _t in [_team, f"{_team} Team"]:
+                            for _t in [_team, _team + " Team"]:
                                 _members = fetch_team_members(_pat, _org, _proj, team=_t)
                                 if _members:
                                     break
