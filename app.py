@@ -253,8 +253,11 @@ def fetch_sprint_members(pat, org, project, team, iteration_path):
             if resp2.status_code != 200:
                 continue
 
+            data = resp2.json()
+            # API returns "teamMembers" (not "value")
+            entries = data.get("teamMembers") or data.get("value", [])
             members = []
-            for entry in resp2.json().get("value", []):
+            for entry in entries:
                 identity = entry.get("teamMember", {})
                 name = identity.get("displayName", "")
                 uid = identity.get("uniqueName", "")
