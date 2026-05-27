@@ -113,7 +113,7 @@ def get_project():
 
 @st.cache_data(show_spinner=False, ttl=300)
 def fetch_area_paths(pat, org, project):
-    """Fetch area paths under SWArea/Product/Core from Azure DevOps."""
+    """Fetch only CoreProductN area paths from Azure DevOps."""
     try:
         url = f"https://dev.azure.com/{org}/{project}/_apis/wit/classificationnodes/areas?$depth=10&api-version=7.1"
         resp = requests.get(url, auth=("", pat), timeout=10)
@@ -126,26 +126,44 @@ def fetch_area_paths(pat, org, project):
                 paths.extend(extract_paths(child, path))
             return paths
         all_paths = extract_paths(resp.json())
-        filter_prefix = "SWArea\\Product\\Core"
-        filtered = [p for p in all_paths if p.startswith(filter_prefix)]
-        return filtered if filtered else all_paths
+        # Only direct CoreProductN children — no Squads or deeper
+        import re as _re
+        filtered = [p for p in all_paths
+                    if _re.search(r'CoreProduct\d+$', p)
+                    and p.count('\\') == 3]
+        return sorted(filtered) if filtered else []
     except Exception:
         return []
 
 @st.cache_data(show_spinner=False, ttl=300)
 def fetch_modules(pat, org, project):
-    """Fetch Endalia Module field allowed values from Azure DevOps."""
+    """Fetch Endalia Module allowed values via picklist API."""
     try:
-        url = f"https://dev.azure.com/{org}/{project}/_apis/wit/workitemtypes/Product%20Backlog%20Item/fields?api-version=7.1"
-        resp = requests.get(url, auth=("", pat), timeout=10)
-        if resp.status_code != 200:
-            return []
-        fields = resp.json().get("value", [])
-        for f in fields:
-            if "EndaliaModule" in f.get("referenceName", "") or "Module" in f.get("name", ""):
-                allowed = f.get("allowedValues", [])
-                if allowed:
-                    return allowed
+        # Step 1: get the field definition to find the picklist ID
+        url1 = f"https://dev.azure.com/{org}/_apis/work/processes/fields?api-version=7.1-preview.2"
+        resp1 = requests.get(url1, auth=("", pat), timeout=10)
+        if resp1.status_code == 200:
+            for f in resp1.json().get("value", []):
+                ref = f.get("referenceName", "")
+                if "EndaliaModule" in ref or ("Module" in f.get("name","") and "Custom" in ref):
+                    picklist_id = f.get("picklistId") or (f.get("picklist") or {}).get("id")
+                    if picklist_id:
+                        url2 = f"https://dev.azure.com/{org}/_apis/work/processes/lists/{picklist_id}?api-version=7.1-preview.1"
+                        resp2 = requests.get(url2, auth=("", pat), timeout=10)
+                        if resp2.status_code == 200:
+                            items = resp2.json().get("items", [])
+                            values = [i.get("value","") for i in items if i.get("value")]
+                            if values:
+                                return sorted(values)
+        # Step 2: fallback — get allowed values from work item type fields
+        url3 = f"https://dev.azure.com/{org}/{project}/_apis/wit/workitemtypes/Product%20Backlog%20Item/fields?$expand=allowedValues&api-version=7.1"
+        resp3 = requests.get(url3, auth=("", pat), timeout=10)
+        if resp3.status_code == 200:
+            for f in resp3.json().get("value", []):
+                if "EndaliaModule" in f.get("referenceName","") or "Module" in f.get("name",""):
+                    vals = f.get("allowedValues", [])
+                    if vals:
+                        return sorted(vals)
         return []
     except Exception:
         return []
