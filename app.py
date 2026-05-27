@@ -100,8 +100,55 @@ RESPONDE SOLO JSON válido sin backticks ni markdown:
 def get_azure_connection():
     from azure.devops.connection import Connection
     from msrest.authentication import BasicAuthentication
-    credentials = BasicAuthentication("", st.secrets["AZURE_PAT"])
-    return Connection(base_url=f"https://dev.azure.com/{st.secrets['AZURE_ORG']}", creds=credentials)
+    pat = st.session_state.get("user_pat") or st.secrets.get("AZURE_PAT", "")
+    org = st.session_state.get("user_org") or st.secrets.get("AZURE_ORG", "")
+    credentials = BasicAuthentication("", pat)
+    return Connection(base_url=f"https://dev.azure.com/{org}", creds=credentials)
+
+def get_org():
+    return st.session_state.get("user_org") or st.secrets.get("AZURE_ORG", "")
+
+def get_project():
+    return st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
+
+@st.cache_data(show_spinner=False, ttl=300)
+def fetch_area_paths(pat, org, project):
+    """Fetch area paths under SWArea/Product/Core from Azure DevOps."""
+    try:
+        url = f"https://dev.azure.com/{org}/{project}/_apis/wit/classificationnodes/areas?$depth=10&api-version=7.1"
+        resp = requests.get(url, auth=("", pat), timeout=10)
+        if resp.status_code != 200:
+            return []
+        def extract_paths(node, prefix=""):
+            path = f"{prefix}\\{node['name']}" if prefix else node['name']
+            paths = [path]
+            for child in node.get('children', []):
+                paths.extend(extract_paths(child, path))
+            return paths
+        all_paths = extract_paths(resp.json())
+        filter_prefix = "SWArea\\Product\\Core"
+        filtered = [p for p in all_paths if p.startswith(filter_prefix)]
+        return filtered if filtered else all_paths
+    except Exception:
+        return []
+
+@st.cache_data(show_spinner=False, ttl=300)
+def fetch_modules(pat, org, project):
+    """Fetch Endalia Module field allowed values from Azure DevOps."""
+    try:
+        url = f"https://dev.azure.com/{org}/{project}/_apis/wit/workitemtypes/Product%20Backlog%20Item/fields?api-version=7.1"
+        resp = requests.get(url, auth=("", pat), timeout=10)
+        if resp.status_code != 200:
+            return []
+        fields = resp.json().get("value", [])
+        for f in fields:
+            if "EndaliaModule" in f.get("referenceName", "") or "Module" in f.get("name", ""):
+                allowed = f.get("allowedValues", [])
+                if allowed:
+                    return allowed
+        return []
+    except Exception:
+        return []
 
 
 def upload_image_to_azure(wit_client, image_b64, filename, project):
@@ -116,7 +163,7 @@ def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, 
     from azure.devops.v7_1.work_item_tracking.models import JsonPatchOperation
     conn = get_azure_connection()
     wit_client = conn.clients.get_work_item_tracking_client()
-    project = st.secrets["AZURE_PROJECT"]
+    project = get_project()
 
     attachment_urls = []
     if figma_b64:
@@ -168,7 +215,7 @@ def push_pbi_to_azure(pbi, iteration_path=None, area_path=None, parent_id=None, 
         if parent_id:
             patch.append({"op": "add", "path": "/relations/-", "value": {
                 "rel": "System.LinkTypes.Hierarchy-Reverse",
-                "url": f"https://dev.azure.com/{st.secrets['AZURE_ORG']}/_apis/wit/workItems/{parent_id}",
+                "url": f"https://dev.azure.com/{get_org()}/_apis/wit/workItems/{parent_id}",
             }})
         patch_ops = [JsonPatchOperation(**p) for p in patch]
         return wit_client.create_work_item(document=patch_ops, project=project, type="Product Backlog Item")
@@ -434,7 +481,7 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
         }}
         </script>""", height=60)
 
-    azure_available = all(k in st.secrets for k in ["AZURE_PAT", "AZURE_ORG", "AZURE_PROJECT"])
+    azure_available = bool(st.session_state.get("user_pat") or st.secrets.get("AZURE_PAT"))
     with col_push:
         if azure_available:
             with st.popover("🚀 Push to Azure DevOps", use_container_width=True):
@@ -639,40 +686,123 @@ html, body, [class*="css"] { font-family: 'IBM Plex Sans', sans-serif !important
 </style>
 """, unsafe_allow_html=True)
 
+# ========== PAT LOGIN ==========
+
+def render_login():
+    st.markdown("""
+    <style>
+    .login-wrap { max-width:480px; margin:80px auto 0 auto; }
+    .login-card { background:#fff; border:1px solid #e2e8f0; border-radius:16px;
+        padding:40px; box-shadow:0 4px 24px rgba(0,0,0,.07); }
+    .login-title { font-size:22px; font-weight:700; color:#0f172a; margin-bottom:6px; }
+    .login-sub { font-size:14px; color:#64748b; margin-bottom:28px; line-height:1.5; }
+    .login-hint { font-size:12px; color:#94a3b8; margin-top:16px; line-height:1.6; }
+    .login-hint a { color:#2563EB; text-decoration:none; }
+    </style>
+    <div class="login-wrap">
+      <div class="login-card">
+        <div class="login-title">📋 Generador de PBIs</div>
+        <div class="login-sub">Introduce tus credenciales de Azure DevOps para empezar.<br>
+        Solo se guardan durante esta sesión.</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.form("login_form"):
+        org = st.text_input("Organización Azure DevOps",
+            placeholder="endalia",
+            help="El nombre de tu organización en dev.azure.com/[org]")
+        project = st.text_input("Proyecto",
+            placeholder="SWArea",
+            help="El nombre del proyecto en Azure DevOps")
+        pat = st.text_input("Personal Access Token (PAT)",
+            type="password",
+            help="Genera tu PAT en Azure DevOps → User Settings → Personal access tokens")
+        submitted = st.form_submit_button("🔑 Conectar", type="primary", use_container_width=True)
+
+        if submitted:
+            if not org.strip() or not project.strip() or not pat.strip():
+                st.error("Rellena todos los campos.")
+            else:
+                with st.spinner("Verificando credenciales..."):
+                    try:
+                        test_url = f"https://dev.azure.com/{org.strip()}/_apis/projects?api-version=7.1"
+                        resp = requests.get(test_url, auth=("", pat.strip()), timeout=8)
+                        if resp.status_code == 200:
+                            st.session_state["user_pat"] = pat.strip()
+                            st.session_state["user_org"] = org.strip()
+                            st.session_state["user_project"] = project.strip()
+                            st.rerun()
+                        elif resp.status_code == 401:
+                            st.error("PAT incorrecto o sin permisos. Verifica que tenga acceso a Work Items.")
+                        else:
+                            st.error(f"No se pudo conectar ({resp.status_code}). Verifica la organización.")
+                    except Exception as e:
+                        st.error(f"Error de conexión: {e}")
+
+    st.markdown("""
+    <div style="max-width:480px;margin:12px auto 0 auto;font-size:12px;color:#94a3b8;line-height:1.7;">
+    💡 <b>Cómo generar tu PAT:</b><br>
+    Azure DevOps → tu avatar (arriba derecha) → <b>Personal access tokens</b> → New Token<br>
+    Permisos necesarios: <b>Work Items → Read & Write</b>
+    </div>
+    """, unsafe_allow_html=True)
+
+# ── Show login if no PAT ──
+_has_pat = st.session_state.get("user_pat") or st.secrets.get("AZURE_PAT")
+_has_org = st.session_state.get("user_org") or st.secrets.get("AZURE_ORG")
+
+if not _has_pat or not _has_org:
+    render_login()
+    st.stop()
+
 # ── Top bar ──
 n_pbis = len(st.session_state.get("result", {}).get("pbis", []))
 module_badge = st.session_state.get("_last_module", "—")
 sprint_badge = st.session_state.get("default_iteration", "—")
 pushed_count = sum(1 for k in st.session_state if k.startswith("pushed_"))
 
-st.markdown(f"""
-<div class="topbar">
-  <div class="topbar-brand">
-    <span style="font-size:20px;">📋</span>
-    <h1>Generador de PBIs</h1>
-    <div class="topbar-divider"></div>
-    <span class="topbar-sub">Describe · Genera · Push Azure</span>
-  </div>
-  <div class="topbar-badges">
-    <div class="tbadge {'tbadge-zero' if n_pbis==0 else ''}">
-      <span class="badge-label">PBIs</span>
-      <span class="badge-val">{n_pbis}</span>
+_user_org = st.session_state.get("user_org") or st.secrets.get("AZURE_ORG", "")
+_user_project = st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
+
+tb_col, logout_col = st.columns([10, 1])
+with tb_col:
+    st.markdown(f"""
+    <div class="topbar">
+      <div class="topbar-brand">
+        <span style="font-size:20px;">📋</span>
+        <h1>Generador de PBIs</h1>
+        <div class="topbar-divider"></div>
+        <span class="topbar-sub">{_user_org} · {_user_project}</span>
+      </div>
+      <div class="topbar-badges">
+        <div class="tbadge {'tbadge-zero' if n_pbis==0 else ''}">
+          <span class="badge-label">PBIs</span>
+          <span class="badge-val">{n_pbis}</span>
+        </div>
+        <div class="tbadge {'tbadge-zero' if pushed_count==0 else ''}">
+          <span class="badge-label">Pusheados</span>
+          <span class="badge-val">{pushed_count}</span>
+        </div>
+        <div class="tbadge tbadge-zero">
+          <span class="badge-label">Módulo</span>
+          <span class="badge-val">{module_badge}</span>
+        </div>
+        <div class="tbadge tbadge-zero">
+          <span class="badge-label">Sprint</span>
+          <span class="badge-val">{sprint_badge}</span>
+        </div>
+      </div>
     </div>
-    <div class="tbadge {'tbadge-zero' if pushed_count==0 else ''}">
-      <span class="badge-label">Pusheados</span>
-      <span class="badge-val">{pushed_count}</span>
-    </div>
-    <div class="tbadge tbadge-zero">
-      <span class="badge-label">Módulo</span>
-      <span class="badge-val">{module_badge}</span>
-    </div>
-    <div class="tbadge tbadge-zero">
-      <span class="badge-label">Sprint</span>
-      <span class="badge-val">{sprint_badge}</span>
-    </div>
-  </div>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+with logout_col:
+    st.markdown("<div style='padding-top:8px;'>", unsafe_allow_html=True)
+    if st.button("🚪", help="Cerrar sesión"):
+        for k in ["user_pat", "user_org", "user_project", "result", "figma_images",
+                  "uploaded_b64", "last_voice_text", "figma_url", "_last_module"]:
+            st.session_state.pop(k, None)
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
 # ── Layout ──
 col_form, col_results = st.columns([5, 7], gap="large")
@@ -694,22 +824,43 @@ with col_form:
     </div>''', unsafe_allow_html=True)
 
     # ── Settings collapsible ──
-    with st.expander("⚙️ Configuración Azure (valores por defecto)", expanded=False):
+    with st.expander("⚙️ Configuración (valores por defecto)", expanded=False):
+        _pat = st.session_state.get("user_pat") or st.secrets.get("AZURE_PAT", "")
+        _org = st.session_state.get("user_org") or st.secrets.get("AZURE_ORG", "")
+        _proj = st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
+
+        # Fetch area paths and modules dynamically
+        _area_paths = fetch_area_paths(_pat, _org, _proj)
+        _modules = fetch_modules(_pat, _org, _proj)
+        if not _modules:
+            _modules = ["Registro y planificación horaria", "Vacaciones y ausencias"]
+
         dcol1, dcol2 = st.columns(2)
         with dcol1:
             default_iteration = st.text_input("Iteration Path", key="default_iteration",
                 value=st.session_state.get("default_iteration", "SWArea"))
-            default_module = st.selectbox("Endalia Module",
-                ["Registro y planificación horaria", "Vacaciones y ausencias"], key="default_module")
+            _module_idx = 0
+            if st.session_state.get("default_module") in _modules:
+                _module_idx = _modules.index(st.session_state["default_module"])
+            default_module = st.selectbox("Endalia Module", _modules,
+                index=_module_idx, key="default_module")
         with dcol2:
-            default_area = st.text_input("Area Path", key="default_area",
-                value=st.session_state.get("default_area", "SWArea\\Product\\Core\\CoreProduct1"))
+            if _area_paths:
+                _area_default = st.session_state.get("default_area", "")
+                _area_idx = _area_paths.index(_area_default) if _area_default in _area_paths else 0
+                default_area = st.selectbox("Area Path", _area_paths,
+                    index=_area_idx, key="default_area")
+            else:
+                default_area = st.text_input("Area Path", key="default_area",
+                    value=st.session_state.get("default_area", "SWArea\\Product\\Core\\CoreProduct1"))
             dcol_ms, dcol_va = st.columns(2)
             with dcol_ms:
-                default_microservice = st.selectbox("Microservice", ["Candidate", "Candidate+1"], key="default_microservice")
+                default_microservice = st.selectbox("Microservice",
+                    ["Candidate", "Candidate+1"], key="default_microservice")
             with dcol_va:
                 default_value_area = st.selectbox("Value Area",
-                    ["Product improvement", "Roadmap", "Operations improvement"], key="default_value_area")
+                    ["Product improvement", "Roadmap", "Operations improvement"],
+                    key="default_value_area")
 
         if st.button("🔄 Nuevo PBI — limpiar todo", use_container_width=True):
             for k in ["result", "figma_images", "uploaded_b64", "last_voice_text",
