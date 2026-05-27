@@ -691,19 +691,6 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                         if _team and _iteration and _iteration != "SWArea":
                             _members = fetch_sprint_members(_pat, _org, _proj, _team, _iteration)
 
-                        # Debug expander — remove after confirming it works
-                        with st.expander("🔍 Debug carga de equipo", expanded=not bool(_members)):
-                            st.caption(f"Team: `{_team}` | Iteration: `{_iteration}`")
-                            st.caption(f"Miembros cargados: {len(_members)}")
-                            if not _members:
-                                st.warning("Sin miembros por capacity — probando team members...")
-                                for _t in [_team, _team + " Team"]:
-                                    _fm = fetch_team_members(_pat, _org, _proj, team=_t)
-                                    st.caption(f"fetch_team_members({_t}): {len(_fm)} resultados")
-                                    if _fm:
-                                        _members = _fm
-                                        break
-
                         if not _members and _team:
                             for _t in [_team, _team + " Team"]:
                                 _members = fetch_team_members(_pat, _org, _proj, team=_t)
@@ -1045,40 +1032,57 @@ with col_form:
             _modules = ["Registro y planificación horaria", "Vacaciones y ausencias"]
         st.session_state["_fetched_modules"] = _modules
 
+        # ── Area Path is the source of truth ──
+        if _area_paths:
+            _area_default = st.session_state.get("default_area", "")
+            # Default to CoreProduct1 if nothing saved
+            if not _area_default or _area_default not in _area_paths:
+                _area_default = next((p for p in _area_paths if "CoreProduct1" in p), _area_paths[0])
+            _area_idx = _area_paths.index(_area_default)
+            default_area = st.selectbox("Mi área (Area Path)", _area_paths,
+                index=_area_idx, key="default_area",
+                help="Al cambiar el área se actualizan el equipo y el sprint automáticamente")
+        else:
+            default_area = st.text_input("Area Path", key="default_area",
+                value=st.session_state.get("default_area", "SWArea\\Product\\Core\\CoreProduct1"))
+
+        # ── Auto-derive team from area ──
+        _derived_team = ""
+        if default_area:
+            import re as _re
+            _m = _re.search("CoreProduct(\\d+)", default_area)
+            if _m:
+                _derived_team = f"CoreProduct{_m.group(1)}"
+        if _derived_team:
+            st.session_state["user_team"] = _derived_team
+        _team_display = _derived_team or st.session_state.get("user_team", "—")
+
+        # ── Auto-load sprint for derived team ──
+        _iterations = fetch_iterations(_pat, _org, _proj, team=_team_display)
+        _saved_iter = st.session_state.get("default_iteration", "")
+
         dcol1, dcol2 = st.columns(2)
         with dcol1:
-            _team_for_iter = st.session_state.get("user_team", "CoreProduct1")
-            _iterations = fetch_iterations(_pat, _org, _proj, team=_team_for_iter)
+            # Sprint selector — auto-loaded for derived team
             if _iterations:
                 _iter_labels = [i["label"] for i in _iterations]
                 _iter_paths = [i["path"] for i in _iterations]
-                _saved_path = st.session_state.get("default_iteration", "")
-                _iter_idx = _iter_paths.index(_saved_path) if _saved_path in _iter_paths else max(0, len(_iter_paths)-1)
+                _iter_idx = _iter_paths.index(_saved_iter) if _saved_iter in _iter_paths else max(0, len(_iter_paths)-1)
                 _selected_iter = st.selectbox("Sprint (Iteration)", _iter_labels,
-                    index=_iter_idx, key="default_iteration_label",
-                    help="Sprints de PRODUCT asignados a tu equipo")
-                # Store full path for Azure API calls
-                _sel_idx = _iter_labels.index(_selected_iter)
-                default_iteration = _iter_paths[_sel_idx]
+                    index=_iter_idx, key="default_iteration_label")
+                default_iteration = _iter_paths[_iter_labels.index(_selected_iter)]
                 st.session_state["default_iteration"] = default_iteration
             else:
                 default_iteration = st.text_input("Iteration Path", key="default_iteration",
-                    value=st.session_state.get("default_iteration", "SWArea"),
-                    help="No se pudieron cargar los sprints. Escribe la ruta completa.")
-            _module_idx = 0
-            if st.session_state.get("default_module") in _modules:
-                _module_idx = _modules.index(st.session_state["default_module"])
+                    value=_saved_iter or "SWArea")
+
+            # Show derived team as read-only info
+            st.caption(f"👥 Equipo derivado: **{_team_display}**")
+
+        with dcol2:
+            _module_idx = _modules.index(st.session_state["default_module"]) if st.session_state.get("default_module") in _modules else 0
             default_module = st.selectbox("Endalia Module", _modules,
                 index=_module_idx, key="default_module")
-        with dcol2:
-            if _area_paths:
-                _area_default = st.session_state.get("default_area", "")
-                _area_idx = _area_paths.index(_area_default) if _area_default in _area_paths else 0
-                default_area = st.selectbox("Area Path", _area_paths,
-                    index=_area_idx, key="default_area")
-            else:
-                default_area = st.text_input("Area Path", key="default_area",
-                    value=st.session_state.get("default_area", "SWArea\\Product\\Core\\CoreProduct1"))
             dcol_ms, dcol_va = st.columns(2)
             with dcol_ms:
                 default_microservice = st.selectbox("Microservice",
@@ -1087,17 +1091,6 @@ with col_form:
                 default_value_area = st.selectbox("Value Area",
                     ["Product improvement", "Roadmap", "Operations improvement"],
                     key="default_value_area")
-
-        # Team selector
-        _teams = fetch_teams(_pat, _org, _proj)
-        if _teams:
-            _default_team = next((t for t in _teams if t == "CoreProduct1"), _teams[0])
-            _current_team = st.session_state.get("user_team", _default_team)
-            _team_idx = _teams.index(_current_team) if _current_team in _teams else 0
-            st.session_state["user_team"] = st.selectbox(
-                "Mi equipo", _teams, index=_team_idx, key="user_team_select",
-                help="Determina qué miembros aparecen en el selector de asignación de tasks"
-            )
 
         if st.button("🔄 Nuevo PBI — limpiar todo", use_container_width=True):
             for k in ["result", "figma_images", "uploaded_b64", "last_voice_text",
