@@ -893,8 +893,9 @@ def render_login():
     """, unsafe_allow_html=True)
 
 # ── Show login if no PAT ──
-_has_pat = st.session_state.get("user_pat") or st.secrets.get("AZURE_PAT")
-_has_org = st.session_state.get("user_org") or st.secrets.get("AZURE_ORG")
+_logged_out = st.session_state.get("_logged_out", False)
+_has_pat = (not _logged_out) and (st.session_state.get("user_pat") or st.secrets.get("AZURE_PAT"))
+_has_org = (not _logged_out) and (st.session_state.get("user_org") or st.secrets.get("AZURE_ORG"))
 
 if not _has_pat or not _has_org:
     render_login()
@@ -909,44 +910,46 @@ pushed_count = sum(1 for k in st.session_state if k.startswith("pushed_"))
 _user_org = st.session_state.get("user_org") or st.secrets.get("AZURE_ORG", "")
 _user_project = st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
 
-tb_col, logout_col = st.columns([10, 1])
-with tb_col:
-    st.markdown(f"""
-    <div class="topbar">
-      <div class="topbar-brand">
-        <span style="font-size:20px;">📋</span>
-        <h1>Generador de PBIs</h1>
-        <div class="topbar-divider"></div>
-        <span class="topbar-sub">{_user_org} · {_user_project}</span>
-      </div>
-      <div class="topbar-badges">
-        <div class="tbadge {'tbadge-zero' if n_pbis==0 else ''}">
-          <span class="badge-label">PBIs</span>
-          <span class="badge-val">{n_pbis}</span>
-        </div>
-        <div class="tbadge {'tbadge-zero' if pushed_count==0 else ''}">
-          <span class="badge-label">Pusheados</span>
-          <span class="badge-val">{pushed_count}</span>
-        </div>
-        <div class="tbadge tbadge-zero">
-          <span class="badge-label">Módulo</span>
-          <span class="badge-val">{module_badge}</span>
-        </div>
-        <div class="tbadge tbadge-zero">
-          <span class="badge-label">Sprint</span>
-          <span class="badge-val">{sprint_badge}</span>
-        </div>
-      </div>
+st.markdown(f"""
+<div class="topbar">
+  <div class="topbar-brand">
+    <span style="font-size:20px;">📋</span>
+    <h1>Generador de PBIs</h1>
+    <div class="topbar-divider"></div>
+    <span class="topbar-sub">{_user_org} · {_user_project}</span>
+  </div>
+  <div class="topbar-badges">
+    <div class="tbadge {'tbadge-zero' if n_pbis==0 else ''}">
+      <span class="badge-label">PBIs</span>
+      <span class="badge-val">{n_pbis}</span>
     </div>
-    """, unsafe_allow_html=True)
-with logout_col:
-    st.markdown("<div style='padding-top:8px;'>", unsafe_allow_html=True)
-    if st.button("🚪", help="Cerrar sesión"):
-        for k in ["user_pat", "user_org", "user_project", "result", "figma_images",
-                  "uploaded_b64", "last_voice_text", "figma_url", "_last_module"]:
-            st.session_state.pop(k, None)
+    <div class="tbadge {'tbadge-zero' if pushed_count==0 else ''}">
+      <span class="badge-label">Pusheados</span>
+      <span class="badge-val">{pushed_count}</span>
+    </div>
+    <div class="tbadge tbadge-zero">
+      <span class="badge-label">Módulo</span>
+      <span class="badge-val">{module_badge}</span>
+    </div>
+    <div class="tbadge tbadge-zero">
+      <span class="badge-label">Sprint</span>
+      <span class="badge-val">{sprint_badge}</span>
+    </div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Logout button — separate, right-aligned, below topbar
+logout_c1, logout_c2 = st.columns([11, 1])
+with logout_c2:
+    if st.button("🚪", help="Cerrar sesión", use_container_width=True):
+        for k in list(st.session_state.keys()):
+            if k not in ("default_iteration", "default_area", "default_module",
+                         "default_microservice", "default_value_area"):
+                st.session_state.pop(k, None)
+        # Force show login even if secrets have AZURE_PAT
+        st.session_state["_logged_out"] = True
         st.rerun()
-    st.markdown("</div>", unsafe_allow_html=True)
 
 # ── Layout ──
 col_form, col_results = st.columns([5, 7], gap="large")
