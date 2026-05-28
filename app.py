@@ -1074,9 +1074,11 @@ with col_form:
                 default_iteration = _iter_paths[_iter_labels.index(_selected_iter)]
                 st.session_state["default_iteration"] = default_iteration
             else:
+                st.caption("⚠️ No se pudieron cargar sprints — escribe la ruta manualmente")
                 default_iteration = st.text_input("Iteration Path", key="default_iteration",
-                    value=_saved_iter or "SWArea")
-            st.caption(f"👥 Equipo derivado: **{_team_display}**")
+                    value=_saved_iter or "SWArea",
+                    help="Ej: SWArea/2026/PRODUCT/Q2/IT7 25.05 - 14.06")
+            st.caption(f"👥 Equipo: **{_team_display}** · iteraciones cargadas: **{len(_iterations)}**")
 
         with dcol2:
             _module_idx = _modules.index(st.session_state["default_module"]) if st.session_state.get("default_module") in _modules else 0
