@@ -553,7 +553,8 @@ def generate_pbis(module, feature, description, context, images):
     # Clean markdown fences and control characters
     clean = raw.replace("```json", "").replace("```", "").strip()
     # Remove control chars that break JSON parsing
-    clean = re.sub(r'[--]', '', clean)
+    clean = re.sub(r'[-
+-]', '', clean)
     try:
         return json.loads(clean)
     except json.JSONDecodeError:
