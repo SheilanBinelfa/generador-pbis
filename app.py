@@ -1020,22 +1020,30 @@ with col_form:
     </div>''', unsafe_allow_html=True)
 
     # ── Settings collapsible ──
+    # Fetch data OUTSIDE expander so it loads even when collapsed
+    _pat = st.session_state.get("user_pat") or st.secrets.get("AZURE_PAT", "")
+    _org = st.session_state.get("user_org") or st.secrets.get("AZURE_ORG", "")
+    _proj = st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
+
+    _area_paths = fetch_area_paths(_pat, _org, _proj)
+    _modules = fetch_modules(_pat, _org, _proj)
+    if not _modules:
+        _modules = ["Registro y planificación horaria", "Vacaciones y ausencias"]
+    st.session_state["_fetched_modules"] = _modules
+
+    # Derive team from saved area
+    _saved_area = st.session_state.get("default_area", "")
+    _m = re.search(r"CoreProduct(\d+)", _saved_area)
+    _derived_team = f"CoreProduct{_m.group(1)}" if _m else "CoreProduct1"
+    if _derived_team:
+        st.session_state["user_team"] = _derived_team
+
+    _iterations = fetch_iterations(_pat, _org, _proj, team=_derived_team)
+
     with st.expander("⚙️ Configuración (valores por defecto)", expanded=False):
-        _pat = st.session_state.get("user_pat") or st.secrets.get("AZURE_PAT", "")
-        _org = st.session_state.get("user_org") or st.secrets.get("AZURE_ORG", "")
-        _proj = st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
-
-        # Fetch area paths and modules dynamically
-        _area_paths = fetch_area_paths(_pat, _org, _proj)
-        _modules = fetch_modules(_pat, _org, _proj)
-        if not _modules:
-            _modules = ["Registro y planificación horaria", "Vacaciones y ausencias"]
-        st.session_state["_fetched_modules"] = _modules
-
         # ── Area Path is the source of truth ──
         if _area_paths:
             _area_default = st.session_state.get("default_area", "")
-            # Default to CoreProduct1 if nothing saved
             if not _area_default or _area_default not in _area_paths:
                 _area_default = next((p for p in _area_paths if "CoreProduct1" in p), _area_paths[0])
             _area_idx = _area_paths.index(_area_default)
@@ -1046,24 +1054,16 @@ with col_form:
             default_area = st.text_input("Area Path", key="default_area",
                 value=st.session_state.get("default_area", "SWArea\\Product\\Core\\CoreProduct1"))
 
-        # ── Auto-derive team from area ──
-        _derived_team = ""
-        if default_area:
-            import re as _re
-            _m = _re.search("CoreProduct(\\d+)", default_area)
-            if _m:
-                _derived_team = f"CoreProduct{_m.group(1)}"
-        if _derived_team:
-            st.session_state["user_team"] = _derived_team
-        _team_display = _derived_team or st.session_state.get("user_team", "—")
+        # Re-derive team from current selection (may differ from saved)
+        _m2 = re.search(r"CoreProduct(\d+)", default_area)
+        _team_display = f"CoreProduct{_m2.group(1)}" if _m2 else _derived_team
+        if _team_display != _derived_team:
+            st.session_state["user_team"] = _team_display
+            _iterations = fetch_iterations(_pat, _org, _proj, team=_team_display)
 
-        # ── Auto-load sprint for derived team ──
-        _iterations = fetch_iterations(_pat, _org, _proj, team=_team_display)
         _saved_iter = st.session_state.get("default_iteration", "")
-
         dcol1, dcol2 = st.columns(2)
         with dcol1:
-            # Sprint selector — auto-loaded for derived team
             if _iterations:
                 _iter_labels = [i["label"] for i in _iterations]
                 _iter_paths = [i["path"] for i in _iterations]
@@ -1075,8 +1075,6 @@ with col_form:
             else:
                 default_iteration = st.text_input("Iteration Path", key="default_iteration",
                     value=_saved_iter or "SWArea")
-
-            # Show derived team as read-only info
             st.caption(f"👥 Equipo derivado: **{_team_display}**")
 
         with dcol2:
