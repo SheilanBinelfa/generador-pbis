@@ -1026,40 +1026,25 @@ with col_form:
     _org = st.session_state.get("user_org") or st.secrets.get("AZURE_ORG", "")
     _proj = st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
 
-    _area_paths = fetch_area_paths(_pat, _org, _proj)
+    # Only fetch if we have valid credentials
+    _saved_area = st.session_state.get("default_area", "")
+    _m = re.search(r"CoreProduct(\d+)", _saved_area)
+    _derived_team = f"CoreProduct{_m.group(1)}" if _m else "CoreProduct1"
+    st.session_state["user_team"] = _derived_team
+
     _modules = fetch_modules(_pat, _org, _proj)
     if not _modules:
         _modules = ["Registro y planificación horaria", "Vacaciones y ausencias"]
     st.session_state["_fetched_modules"] = _modules
 
-    # Derive team from saved area
-    _saved_area = st.session_state.get("default_area", "")
-    _m = re.search(r"CoreProduct(\d+)", _saved_area)
-    _derived_team = f"CoreProduct{_m.group(1)}" if _m else "CoreProduct1"
-    if _derived_team:
-        st.session_state["user_team"] = _derived_team
+    if _pat and _org and _proj:
+        _area_paths = fetch_area_paths(_pat, _org, _proj)
+        _iterations = fetch_iterations(_pat, _org, _proj, team=_derived_team)
+    else:
+        _area_paths = []
+        _iterations = []
 
-    _iterations = fetch_iterations(_pat, _org, _proj, team=_derived_team)
 
-    # Diagnóstico temporal
-    if not _area_paths or not _iterations:
-        with st.expander("⚠️ Diagnóstico de conexión", expanded=True):
-            st.caption(f"Org: `{_org}` | Project: `{_proj}` | Team: `{_derived_team}`")
-            st.caption(f"Area paths: {len(_area_paths)} | Iterations: {len(_iterations)}")
-            # Test basic connectivity
-            try:
-                test = requests.get(
-                    f"https://dev.azure.com/{_org}/{_proj}/_apis/wit/classificationnodes/areas?$depth=2&api-version=7.1",
-                    auth=("", _pat), timeout=8
-                )
-                st.caption(f"Areas API status: {test.status_code}")
-                test2 = requests.get(
-                    f"https://dev.azure.com/{_org}/{_proj}/CoreProduct1/_apis/work/teamsettings/iterations?api-version=7.1",
-                    auth=("", _pat), timeout=8
-                )
-                st.caption(f"Iterations API status: {test2.status_code}")
-            except Exception as ex:
-                st.caption(f"Error: {ex}")
 
     with st.expander("⚙️ Configuración (valores por defecto)", expanded=False):
         # ── Area Path is the source of truth ──
@@ -1098,7 +1083,7 @@ with col_form:
                 default_iteration = st.text_input("Iteration Path", key="default_iteration",
                     value=_saved_iter or "SWArea",
                     help="Ej: SWArea/2026/PRODUCT/Q2/IT7 25.05 - 14.06")
-            st.caption(f"👥 Equipo: **{_team_display}** · iteraciones cargadas: **{len(_iterations)}**")
+            st.caption(f"👥 Equipo derivado: **{_team_display}**")
 
         with dcol2:
             _module_idx = _modules.index(st.session_state["default_module"]) if st.session_state.get("default_module") in _modules else 0
