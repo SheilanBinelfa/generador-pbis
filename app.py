@@ -894,44 +894,48 @@ def render_login():
     </div>
     """, unsafe_allow_html=True)
 
-    with st.form("login_form"):
-        lc1, lc2 = st.columns(2)
-        with lc1:
-            org = st.text_input("Organización Azure DevOps",
-                placeholder="endalia",
-                help="El nombre de tu organización en dev.azure.com/[org]")
-        with lc2:
-            project = st.text_input("Proyecto",
-                placeholder="SWArea",
-                help="El nombre del proyecto en Azure DevOps")
-        pat = st.text_input("Personal Access Token (PAT)",
-            type="password",
-            help="Genera tu PAT en Azure DevOps → tu avatar → Personal access tokens → New Token → Work Items: Read & Write")
-        submitted = st.form_submit_button("🔑 Conectar", type="primary", use_container_width=True)
+    lc1, lc2 = st.columns(2)
+    with lc1:
+        org = st.text_input("Organización Azure DevOps",
+            placeholder="endalia",
+            key="login_org",
+            help="El nombre de tu organización en dev.azure.com/[org]")
+    with lc2:
+        project = st.text_input("Proyecto",
+            placeholder="SWArea",
+            key="login_project",
+            help="El nombre del proyecto en Azure DevOps")
+    pat = st.text_input("Personal Access Token (PAT)",
+        type="password",
+        key="login_pat",
+        help="Genera tu PAT en Azure DevOps → tu avatar → Personal access tokens → New Token → Work Items: Read & Write")
 
-        if submitted:
-            if not org.strip() or not project.strip() or not pat.strip():
-                st.error("Rellena todos los campos.")
-            else:
-                with st.spinner("Verificando credenciales..."):
-                    try:
-                        test_url = f"https://dev.azure.com/{org.strip()}/_apis/projects?api-version=7.1"
-                        resp = requests.get(test_url, auth=("", pat.strip()), timeout=8)
-                        if resp.status_code == 200:
-                            st.session_state["user_pat"] = pat.strip()
-                            st.session_state["user_org"] = org.strip()
-                            st.session_state["user_project"] = project.strip()
-                            # Auto-detect team
-                            teams = fetch_teams(pat.strip(), org.strip(), project.strip())
-                            if len(teams) == 1:
-                                st.session_state["user_team"] = teams[0]
-                            st.rerun()
-                        elif resp.status_code == 401:
-                            st.error("PAT incorrecto o sin permisos. Verifica que tenga acceso a Work Items.")
-                        else:
-                            st.error(f"No se pudo conectar ({resp.status_code}). Verifica la organización.")
-                    except Exception as e:
-                        st.error(f"Error de conexión: {e}")
+    if st.button("🔑 Conectar", type="primary", use_container_width=True):
+        org = st.session_state.get("login_org", "").strip()
+        project = st.session_state.get("login_project", "").strip()
+        pat = st.session_state.get("login_pat", "").strip()
+        if not org or not project or not pat:
+            st.error("Rellena todos los campos.")
+        else:
+            with st.spinner("Verificando credenciales..."):
+                try:
+                    test_url = f"https://dev.azure.com/{org}/_apis/projects?api-version=7.1"
+                    resp = requests.get(test_url, auth=("", pat), timeout=8)
+                    if resp.status_code == 200:
+                        st.session_state["user_pat"] = pat
+                        st.session_state["user_org"] = org
+                        st.session_state["user_project"] = project
+                        st.session_state.pop("_logged_out", None)
+                        teams = fetch_teams(pat, org, project)
+                        if len(teams) == 1:
+                            st.session_state["user_team"] = teams[0]
+                        st.rerun()
+                    elif resp.status_code == 401:
+                        st.error("PAT incorrecto o sin permisos. Verifica que tenga acceso a Work Items.")
+                    else:
+                        st.error(f"No se pudo conectar ({resp.status_code}). Verifica la organización.")
+                except Exception as e:
+                    st.error(f"Error de conexión: {e}")
 
     st.markdown("""
     <div style="max-width:480px;margin:12px auto 0 auto;font-size:12px;color:#94a3b8;line-height:1.7;">
