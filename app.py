@@ -167,11 +167,10 @@ def fetch_area_paths(pat, org, project):
         product = find_node(swarea, "Product")
         core = find_node(product, "Core") if product else None
         if core:
-            import re as _re
             paths = []
             for child in core.get("children", []):
                 name = child.get("name", "")
-                if _re.match(r"CoreProduct\d+$", name):
+                if re.match(r"CoreProduct\d+$", name):
                     paths.append(f"SWArea\\Product\\Core\\{name}")
             return sorted(paths)
         return []
@@ -468,8 +467,7 @@ def _build_pbi_html_body(p):
 @st.cache_data(show_spinner=False)
 def pbi_to_html_cached(pbi_json, figma_b64_tuple, figma_link):
     """Cached version - takes hashable args."""
-    import json as _j
-    p = _j.loads(pbi_json)
+    p = json.loads(pbi_json)
     figma_images_b64 = list(figma_b64_tuple) if figma_b64_tuple else None
     return _pbi_to_html_inner(p, figma_images_b64, figma_link)
 
@@ -537,7 +535,7 @@ def pbi_to_html_with_urls(p, attachment_urls=None, figma_link=None):
 def generate_pbis(module, feature, description, context, images):
     client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
     user_content = []
-    text = f"MÓDULO: {module or 'No especificado'}\nFEATURE: {feature or 'No especificada'}\n\nDESCRIPCIÓN:\n{description}"
+    text = f"MÓDULO: {module or 'No especificado'}\nFEATURE: {feature or 'No especificada'}\n\nIMPORTANTE: El título de cada PBI DEBE comenzar exactamente con '{module} - {feature} - US X.X - ' seguido de la acción concreta. No omitas estos prefijos.\n\nDESCRIPCIÓN:\n{description}"
     if context:
         text += f"\n\nCONTEXTO TÉCNICO:\n{context}"
     if images:
@@ -589,7 +587,7 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                 figma_link or ""
             )
         except Exception:
-            html_content = pbi_to_html(pbi, figma_b64, figma_link)
+            html_content = _pbi_to_html_inner(pbi, figma_b64, figma_link)
         st.session_state[_cache_key] = html_content
         st.session_state[f"_html_hash_{idx}"] = _pbi_hash
     else:
@@ -996,11 +994,9 @@ st.markdown(f"""
 logout_c1, logout_c2 = st.columns([11, 1])
 with logout_c2:
     if st.button("🚪", help="Cerrar sesión", use_container_width=True):
+        # Clear everything including credentials
         for k in list(st.session_state.keys()):
-            if k not in ("default_iteration", "default_area", "default_module",
-                         "default_microservice", "default_value_area"):
-                st.session_state.pop(k, None)
-        # Force show login even if secrets have AZURE_PAT
+            st.session_state.pop(k, None)
         st.session_state["_logged_out"] = True
         st.rerun()
 
