@@ -177,35 +177,30 @@ def fetch_area_paths(pat, org, project):
     except Exception:
         return []
 
-@st.cache_data(show_spinner=False, ttl=300)
+@st.cache_data(show_spinner=False, ttl=3600)
 def fetch_modules(pat, org, project):
-    """Fetch Endalia Module allowed values via picklist API."""
+    """Fetch Endalia Module values by querying existing PBIs via WIQL."""
     try:
-        # Step 1: get the field definition to find the picklist ID
-        url1 = f"https://dev.azure.com/{org}/_apis/work/processes/fields?api-version=7.1-preview.2"
-        resp1 = requests.get(url1, auth=("", pat), timeout=10)
-        if resp1.status_code == 200:
-            for f in resp1.json().get("value", []):
-                ref = f.get("referenceName", "")
-                if "EndaliaModule" in ref or ("Module" in f.get("name","") and "Custom" in ref):
-                    picklist_id = f.get("picklistId") or (f.get("picklist") or {}).get("id")
-                    if picklist_id:
-                        url2 = f"https://dev.azure.com/{org}/_apis/work/processes/lists/{picklist_id}?api-version=7.1-preview.1"
-                        resp2 = requests.get(url2, auth=("", pat), timeout=10)
-                        if resp2.status_code == 200:
-                            items = resp2.json().get("items", [])
-                            values = [i.get("value","") for i in items if i.get("value")]
-                            if values:
-                                return sorted(values)
-        # Step 2: fallback — get allowed values from work item type fields
-        url3 = f"https://dev.azure.com/{org}/{project}/_apis/wit/workitemtypes/Product%20Backlog%20Item/fields?$expand=allowedValues&api-version=7.1"
-        resp3 = requests.get(url3, auth=("", pat), timeout=10)
-        if resp3.status_code == 200:
-            for f in resp3.json().get("value", []):
-                if "EndaliaModule" in f.get("referenceName","") or "Module" in f.get("name",""):
-                    vals = f.get("allowedValues", [])
-                    if vals:
-                        return sorted(vals)
+        # Use WIQL to find distinct EndaliaModule values from existing PBIs
+        url = f"https://dev.azure.com/{org}/{project}/_apis/wit/wiql?api-version=7.1"
+        query = {
+            "query": "SELECT [Custom.EndaliaModule] FROM WorkItems WHERE [System.WorkItemType] = 'Product Backlog Item' AND [Custom.EndaliaModule] <> '' ORDER BY [System.ChangedDate] DESC"
+        }
+        resp = requests.post(url, json=query, auth=("", pat), timeout=10)
+        if resp.status_code == 200:
+            work_items = resp.json().get("workItems", [])[:50]
+            if work_items:
+                ids = ",".join(str(w["id"]) for w in work_items)
+                url2 = f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems?ids={ids}&fields=Custom.EndaliaModule&api-version=7.1"
+                resp2 = requests.get(url2, auth=("", pat), timeout=10)
+                if resp2.status_code == 200:
+                    values = set()
+                    for item in resp2.json().get("value", []):
+                        v = item.get("fields", {}).get("Custom.EndaliaModule", "")
+                        if v:
+                            values.add(v)
+                    if values:
+                        return sorted(values)
         return []
     except Exception:
         return []
