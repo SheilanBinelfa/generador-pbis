@@ -111,7 +111,7 @@ def get_org():
 def get_project():
     return st.session_state.get("user_project") or st.secrets.get("AZURE_PROJECT", "")
 
-@st.cache_data(show_spinner=False, ttl=300)
+@st.cache_data(show_spinner=False, ttl=60)
 def fetch_iterations(pat, org, project, team="CoreProduct1"):
     """Fetch sprint iterations under PRODUCT from Azure DevOps team settings."""
     try:
@@ -177,33 +177,39 @@ def fetch_area_paths(pat, org, project):
     except Exception:
         return []
 
-@st.cache_data(show_spinner=False, ttl=3600)
 def fetch_modules(pat, org, project):
-    """Fetch Endalia Module values by querying existing PBIs via WIQL."""
-    try:
-        # Use WIQL to find distinct EndaliaModule values from existing PBIs
-        url = f"https://dev.azure.com/{org}/{project}/_apis/wit/wiql?api-version=7.1"
-        query = {
-            "query": "SELECT [Custom.EndaliaModule] FROM WorkItems WHERE [System.WorkItemType] = 'Product Backlog Item' AND [Custom.EndaliaModule] <> '' ORDER BY [System.ChangedDate] DESC"
-        }
-        resp = requests.post(url, json=query, auth=("", pat), timeout=10)
-        if resp.status_code == 200:
-            work_items = resp.json().get("workItems", [])[:50]
-            if work_items:
-                ids = ",".join(str(w["id"]) for w in work_items)
-                url2 = f"https://dev.azure.com/{org}/{project}/_apis/wit/workitems?ids={ids}&fields=Custom.EndaliaModule&api-version=7.1"
-                resp2 = requests.get(url2, auth=("", pat), timeout=10)
-                if resp2.status_code == 200:
-                    values = set()
-                    for item in resp2.json().get("value", []):
-                        v = item.get("fields", {}).get("Custom.EndaliaModule", "")
-                        if v:
-                            values.add(v)
-                    if values:
-                        return sorted(values)
-        return []
-    except Exception:
-        return []
+    """Return known Endalia Module values."""
+    return [
+        "Agente",
+        "AIOrchestrator",
+        "Autenticación y accesos",
+        "Back (Transversal)",
+        "Back Office",
+        "Beneficios Sociales",
+        "Biostart",
+        "Buscador",
+        "Compensación",
+        "Comunicación",
+        "Control de Accesos",
+        "Cuadro de Mando",
+        "Datos Maestros",
+        "Desarrollo",
+        "Encuestas",
+        "Expediente del empleado",
+        "Formación",
+        "Gestión de Proyectos",
+        "Informes",
+        "Integración",
+        "Nóminas",
+        "Onboarding",
+        "Organización y personas",
+        "Portal del empleado",
+        "Registro y planificación horaria",
+        "Reclutamiento",
+        "Seguridad Social",
+        "Solicitudes",
+        "Vacaciones y ausencias",
+    ]
 
 @st.cache_data(show_spinner=False, ttl=300)
 def fetch_sprint_members(pat, org, project, team, iteration_path):
