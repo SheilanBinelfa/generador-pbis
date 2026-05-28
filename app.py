@@ -67,10 +67,14 @@ Usa comillas simples para nombres de campos/secciones y comillas dobles para tex
 
 ---
 
-## CRITERIOS DE ACEPTACIÓN
+## REGLAS GENERALES
 
-Cada criterio es una acción concreta seguida de un resultado observable y verificable.
-Cubre: carga inicial, campos obligatorios, cada comportamiento condicional, cada validación, actualizaciones automáticas y estados especiales.
+- **La descripción de la feature es la fuente de la intención de negocio.** Si indica que algo no debe desarrollarse (aunque esté en el prototipo), omítelo de la especificación.
+- **No describas la implementación técnica** (componentes, clases CSS, nombres de servicios). El PBI describe comportamiento y apariencia, no código.
+- **No incluyas datos de ejemplo del prototipo** como datos reales (fechas, nombres, valores concretos) salvo que sean valores por defecto intencionales.
+- **Corrige errores tipográficos** del prototipo o la descripción de la feature en el PBI.
+- **Nunca mezcles el estado actual con el estado objetivo.** Si algo debe añadirse, descríbelo como nuevo. No lo incluyas en la lista de elementos existentes y luego repitas que hay que añadirlo.
+- Si el prototipo muestra un único estado y hay estados alternativos relevantes no cubiertos, señálalo en las Notas técnicas y solicita las capturas que faltan.
 
 ---
 
@@ -659,8 +663,10 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                     endalia_module = st.selectbox("Endalia Module", _modal_modules,
                         index=_modal_modules.index(_emod_default),
                         key=f"emodule_{idx}")
-                    value_area = st.selectbox("Value Area",
-                        ["Product improvement", "Roadmap", "Operations improvement"],
+                    _va_opts = ["Product improvement", "Roadmap", "Operations improvement"]
+                    _va_idx = _va_opts.index(default_value_area) if default_value_area in _va_opts else 0
+                    value_area = st.selectbox("Value Area", _va_opts,
+                        index=_va_idx,
                         key=f"varea_{idx}")
                 with c2:
                     area = st.text_input("Area Path", value=default_area, key=f"area_{idx}")
