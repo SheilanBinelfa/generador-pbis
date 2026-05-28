@@ -1041,6 +1041,26 @@ with col_form:
 
     _iterations = fetch_iterations(_pat, _org, _proj, team=_derived_team)
 
+    # Diagnóstico temporal
+    if not _area_paths or not _iterations:
+        with st.expander("⚠️ Diagnóstico de conexión", expanded=True):
+            st.caption(f"Org: `{_org}` | Project: `{_proj}` | Team: `{_derived_team}`")
+            st.caption(f"Area paths: {len(_area_paths)} | Iterations: {len(_iterations)}")
+            # Test basic connectivity
+            try:
+                test = requests.get(
+                    f"https://dev.azure.com/{_org}/{_proj}/_apis/wit/classificationnodes/areas?$depth=2&api-version=7.1",
+                    auth=("", _pat), timeout=8
+                )
+                st.caption(f"Areas API status: {test.status_code}")
+                test2 = requests.get(
+                    f"https://dev.azure.com/{_org}/{_proj}/CoreProduct1/_apis/work/teamsettings/iterations?api-version=7.1",
+                    auth=("", _pat), timeout=8
+                )
+                st.caption(f"Iterations API status: {test2.status_code}")
+            except Exception as ex:
+                st.caption(f"Error: {ex}")
+
     with st.expander("⚙️ Configuración (valores por defecto)", expanded=False):
         # ── Area Path is the source of truth ──
         if _area_paths:
