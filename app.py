@@ -877,22 +877,24 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
 
     # ── Card header ──
     pushed_info = st.session_state.get(pushed_key, None)
-    pushed_badge = f'<span style="background:#064e3b;color:#6ee7b7;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:6px;">✅ #{pushed_info}</span>' if pushed_info else ""
+    pushed_badge_html = f'<span style="background:#064e3b;color:#6ee7b7;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:6px;">✅ #{pushed_info}</span>' if pushed_info else ""
     role_val = pbi.get("role", "")
     role_color = {"Colaborador": "#0ea5e9", "Responsable": "#8b5cf6", "perfil RRHH": "#f59e0b"}.get(role_val, "#64748b")
     role_bg = {"Colaborador": "#e0f2fe", "Responsable": "#ede9fe", "perfil RRHH": "#fef3c7"}.get(role_val, "#f1f5f9")
-    role_badge = f'<span style="background:{role_bg};color:{role_color};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;">{role_val}</span>' if role_val else ""
-    pbi_num_badge = f'<span style="background:#1e293b;color:#94a3b8;border-radius:4px;padding:2px 8px;font-size:11px;font-family:monospace;">US {idx+1}/{total}</span>'
-    st.markdown(f"""
-    <div style="background:#0f172a;border-radius:8px 8px 0 0;padding:12px 16px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-            {pbi_num_badge}
-            {role_badge}
-            {pushed_badge}
+    role_badge_html = f'<span style="background:{role_bg};color:{role_color};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;">{role_val}</span>' if role_val else ""
+    pbi_num_html = f'<span style="background:#1e293b;color:#94a3b8;border-radius:4px;padding:2px 8px;font-size:11px;font-family:monospace;">US {idx+1}/{total}</span>'
+    title_safe = pbi["title"].replace("<","&lt;").replace(">","&gt;")
+    st.components.v1.html(f"""
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap" rel="stylesheet">
+    <div style="background:#0f172a;border-radius:8px 8px 0 0;padding:12px 16px;font-family:'IBM Plex Sans',sans-serif;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap;">
+            {pbi_num_html}
+            {role_badge_html}
+            {pushed_badge_html}
         </div>
-        <div style="color:#f8fafc;font-size:14px;font-weight:600;line-height:1.4;">{pbi['title']}</div>
+        <div style="color:#f8fafc;font-size:14px;font-weight:600;line-height:1.4;">{title_safe}</div>
     </div>
-    """, unsafe_allow_html=True)
+    """, height=80)
 
     # ── Action buttons ──
     col_copy, col_push = st.columns([1, 1])
