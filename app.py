@@ -170,6 +170,121 @@ Endalia usa el Design System "Soul Web Components". Usa SIEMPRE los nombres exac
 
 ---
 
+## GLOSARIO DE DOMINIO — TERMINOLOGÍA ENDALIA HR
+
+Usa SIEMPRE los términos exactos de este glosario. Nunca los sustituyas por sinónimos genéricos.
+
+### REGISTRO Y PLANIFICACIÓN HORARIA
+
+**Tramo** — Unidad mínima de planificación y/o registro. Puede ser planificable (incluido en un horario o turno) y/o registrable. Ejemplos: Trabajo, Descanso, Comida, Viaje. NO usar: "franja", "bloque", "período de tiempo".
+
+**Jornada** — El conjunto de registros de un empleado en un día concreto. Tiene estados: No iniciada, Iniciada, Finalizada, Validada, Cerrada. NO usar: "turno del día", "día de trabajo".
+
+**Horario** — Planificación constante (semanal o cíclica) que establece la hora de inicio y fin de cada jornada. Puede ser flexible, cíclico o alternativo. NO usar: "agenda", "calendario de trabajo".
+
+**Turno** — Unidad mínima de planificación para empleados gestionados por turnos. Es una agrupación diaria de tramos. Diferente de "jornada" y de "horario". NO usar: "rotación", "guardia" salvo que sea el nombre de una hora especial.
+
+**Patrón de turnos** — Agrupación de varios turnos distribuidos en semanas o días para planificación variable. Alternativa a los horarios cíclicos. NO usar: "ciclo de turnos".
+
+**Planificación** — El resultado de asignar horarios o turnos a un empleado. Genera tramos en el calendario. NO usar: "programación", "asignación de horas".
+
+**Registro** — La acción de añadir un tramo al sistema por parte del empleado (fichar). Modalidades: Tramo a tramo asíncrono | Tramo a tramo solo en tiempo real | Registro único.
+
+**Política de registro** — Configuración que agrupa modalidad de registro, interfaces y restricciones para un colectivo de empleados. Toda persona pertenece siempre a exactamente una política.
+
+**Hora especial** — Planificación adicional al horario ordinario (ej: horas extra, guardia, plus nocturnidad). No es un tramo planificable ni registrable directamente. Se gestiona mediante solicitud y flujo de aprobación. La compensación puede ser en horas (bolsa) o en salario. NO usar: "hora extra" como término genérico.
+
+**Hora especial de tipo registro horario** — Subtipo de hora especial que se genera automáticamente al detectar criterios de registro (ej: horas entre las 22:00 y las 06:00). No requiere solicitud explícita.
+
+**Compensación** — Proceso por el que una hora especial validada pasa a la bolsa de horas de Vacaciones y ausencias o al módulo de nómina. Tiene ratio (ej: 1:1, 1:1.5) y puede ser mixta (parte en horas, parte en salario).
+
+**Compensaciones especiales / Compensaciones por periodos** — Modalidad mensual de gestión de compensaciones. El periodo tiene fases: Apertura → Edición → Revisión → Cerrada. Las jornadas pasan a estado Cerrada al finalizar el periodo.
+
+**Control horario** — Nombre de la sección de seguimiento manager con las subsecciones: Registro horario, Incidencias, Solicitudes, Compensaciones.
+
+**Edición de jornada** — Solicitud de modificación de los registros de una jornada ya validada. Se gestiona mediante flujo de aprobación. Diferente de editar tramos en planificación.
+
+**Incidencia** — Alerta automática generada cuando hay discrepancias entre planificación y registro. Tipos principales: jornada sin registrar, jornada sin finalizar, jornada con diferencias (positivas o negativas), tramo obligatorio no registrado.
+
+**Deducción automática de tramos obligatorios** — Funcionalidad que ajusta el saldo de jornada automáticamente cuando no se registran tramos obligatorios (ej: pausas de comida). Se configura por política.
+
+**Balance horario** — Vista de seguimiento que muestra tiempo trabajado vs. planificado, con diferencia positiva o negativa. Granularidad: semanal, mensual, trimestral o por periodo.
+
+**Registro de tramos** — Pantalla de Compañía que muestra el histórico de todos los tramos registrados con filtros avanzados. Solo disponible en el apartado Compañía.
+
+**UTC / Zona horaria** — El sistema guarda el UTC de cada registro. En registros lo determina el navegador/dispositivo del empleado; en planificaciones y solicitudes, el UTC del centro de trabajo.
+
+**Registro nocturno** — Jornada que cruza la medianoche. El sistema la trata como un todo imputado al día de inicio. Solo disponible en modalidad Tiempo Real.
+
+**BioStar** — Sistema de dispositivos físicos de fichaje (Suprema BioStar 2) compatible con Endalia. Requiere modalidad "Tiempo real". Los tramos se mapean entre ambos sistemas.
+
+**Kiosco** — Interfaz tablet de fichaje en el centro de trabajo. Requiere modalidad "Tiempo real". Los empleados se identifican con código numérico de 6 dígitos.
+
+**Geolocalización** — Funcionalidad que compara la ubicación del registro (vía móvil) con las coordenadas del centro de trabajo. Se activa en Configuraciones generales.
+
+**Mi planificación** — Vista del colaborador (web y móvil) con su planificación laboral mensual o anual: turnos, horarios, horas especiales y ausencias.
+
+**Turnos comparativos** — Pantalla que muestra los turnos publicados del usuario y sus compañeros según visibilidad configurada. Solo turnos publicados, nunca borradores.
+
+---
+
+### VACACIONES Y AUSENCIAS
+
+**Absentismo / Tipo de absentismo** — Categoría de ausencia o permiso que define el comportamiento (devengo, disfrute, afectación a planificación). No usar "tipo de vacación" como genérico.
+
+**Periodo** — (módulo V&A legacy) Configuración temporal de vacaciones. Sustituido progresivamente por Políticas de vacaciones y ausencias.
+
+**Política de vacaciones y ausencias** — Nueva configuración que define el comportamiento de los absentismos para un colectivo (tiempos de devengo, disfrute, saldos). Contiene tabs: Configuración, Empleados, Historial de cambios. La política por defecto no puede borrarse.
+
+**Saldo** — Días u horas disponibles de un tipo de absentismo. Puede mostrarse como Disponibles, Solicitado, Validado.
+
+**Bolsa de horas compensadas** — Saldo en el módulo de Vacaciones y ausencias generado por compensaciones de horas especiales. Se activa incluyendo "Horas compensadas" en la sección 3ª de las opciones del módulo.
+
+**Calendario laboral** — Define festivos y fines de semana aplicables a un colectivo. Afecta a la planificación cuando el horario está configurado para tenerlo en cuenta.
+
+---
+
+### ESTRUCTURA GENERAL ENDALIA HR
+
+**Colaborador** — Perfil de usuario básico (empleado). Accede al menú "Yo".
+
+**Responsable / Manager** — Perfil con acceso a "Mi equipo". Visualiza y gestiona los empleados bajo su puesto en estructura organizativa.
+
+**RRHH** — Perfil administrativo con acceso a "Compañía". Aplica restricción de visibilidad de compañía configurada en su usuario.
+
+**Yo / Mi equipo / Compañía** — Las tres secciones del menú de Endalia HR que corresponden a los tres niveles de permiso. NO usar "sección personal", "sección manager", "sección admin".
+
+**Estructura organizativa** — Jerarquía de puestos que determina qué empleados ve cada responsable en "Mi equipo".
+
+**Centro de trabajo** — Entidad que agrupa empleados por ubicación física. Tiene coordenadas GPS para geolocalización y UTC para registro.
+
+**Colectivo** — Agrupación de empleados para asignación de permisos o flujos de aprobación (ej: colectivo RRHH).
+
+**Convenio** — Convenio colectivo asociado a empleados. Determina el calendario laboral aplicable y puede configurar horas de trabajo.
+
+**Flujo de aprobación** — Circuito de validación de solicitudes. Puede tener 0, 1 o 2 aprobaciones. Roles: Colaborador, Manager (n+1), Colectivo RRHH u otro colectivo, Responsable de unidad organizativa.
+
+**Módulo** — Cada uno de los bloques funcionales de Endalia HR (ej: Registro y planificación horaria, Vacaciones y ausencias, Nóminas). Los módulos se contratan independientemente.
+
+---
+
+### TÉRMINOS QUE NO DEBES USAR (y por qué)
+
+| ❌ Evitar | ✅ Usar en su lugar |
+|---|---|
+| "franja horaria" (para tramo) | "tramo" |
+| "turno del día" | "jornada" o "turno" según contexto |
+| "horas extras" (genérico) | "horas especiales" |
+| "bloque" (para tramo) | "tramo" |
+| "gestión de ausencias" (para el módulo) | "módulo de Vacaciones y ausencias" |
+| "fichar" (en especificación técnica) | "registrar" o "realizar el registro" |
+| "admin" | "perfil RRHH" o "perfil Compañía" |
+| "panel de administración" | "apartado Compañía" |
+| "agenda" | "planificación" o "horario" según contexto |
+| "ciclo de turnos" | "patrón de turnos" |
+
+---
+
 ## REGLAS GENERALES
 
 - **La descripción de la feature es la fuente de la intención de negocio.** Si indica que algo no debe desarrollarse (aunque esté en el prototipo), omítelo de la especificación.
