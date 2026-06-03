@@ -702,15 +702,17 @@ def _render_functional_spec(spec_text):
 
         elif stripped.startswith("- "):
             if not in_list:
-                html += "<ul>"
+                html += '<ul style="margin:4px 0 8px 0;padding-left:20px;">'
                 in_list = True
-            html += f"<li>{stripped[2:]}</li>"
+            html += f'<li style="list-style-type:disc;margin:2px 0;">{stripped[2:]}</li>'
 
         else:
-            if in_list:
-                html += "</ul>"
-                in_list = False
-            html += f"<p>{stripped}</p>"
+            # Non-header, non-dash line: treat as list item too
+            # (model sometimes omits the leading dash)
+            if not in_list:
+                html += '<ul style="margin:4px 0 8px 0;padding-left:20px;">'
+                in_list = True
+            html += f'<li style="list-style-type:disc;margin:2px 0;">{stripped}</li>'
 
     if in_list:
         html += "</ul>"
@@ -726,19 +728,19 @@ def _build_pbi_html_body(p):
         h += _render_functional_spec(p["functional_spec"])
     h += "<h3>👤 Historia de Usuario</h3>"
     h += f"<p><b>Como</b> {p['role']}<br><b>Cuando</b> {p['when']}<br><b>Entonces</b> {p['then']}<br><b>Para</b> {p['benefit']}</p>"
-    h += "<h3>✅ Criterios de Aceptación</h3><h4>Happy Path</h4><ul>"
+    h += "<h3>✅ Criterios de Aceptación</h3><h4><b>Happy Path</b></h4><ul style='margin:4px 0 8px 0;padding-left:20px;'>"
     for ac in p.get("happy_path", []):
-        h += f"<li>{ac}</li>"
+        h += f'<li style="list-style-type:disc;margin:2px 0;">{ac}</li>'
     h += "</ul>"
     if p.get("validations"):
-        h += "<h4>Validaciones y Edge Cases</h4><ul>"
+        h += "<h4><b>Validaciones y Edge Cases</b></h4><ul style='margin:4px 0 8px 0;padding-left:20px;'>"
         for v in p["validations"]:
-            h += f"<li>{v}</li>"
+            h += f'<li style="list-style-type:disc;margin:2px 0;">{v}</li>'
         h += "</ul>"
     if p.get("error_states"):
-        h += "<h4>Estados de Error</h4><ul>"
+        h += "<h4><b>Estados de Error</b></h4><ul style='margin:4px 0 8px 0;padding-left:20px;'>"
         for e in p["error_states"]:
-            h += f"<li>{e}</li>"
+            h += f'<li style="list-style-type:disc;margin:2px 0;">{e}</li>'
         h += "</ul>"
     return h
 
@@ -769,12 +771,12 @@ def _pbi_to_html_inner(p, figma_images_b64=None, figma_link=None):
     if p.get("dependencies"):
         h += "<h3>🔗 Dependencias</h3><ul>"
         for d in p["dependencies"]:
-            h += f"<li>{d}</li>"
+            h += f'<li style="list-style-type:disc;margin:2px 0;">{d}</li>'
         h += "</ul>"
     if p.get("tech_notes"):
         h += "<h3>💡 Notas Técnicas</h3><ul>"
         for n in p["tech_notes"]:
-            h += f"<li>{n}</li>"
+            h += f'<li style="list-style-type:disc;margin:2px 0;">{n}</li>'
         h += "</ul>"
     return h
 
@@ -799,12 +801,12 @@ def pbi_to_html_with_urls(p, attachment_urls=None, figma_link=None):
     if p.get("dependencies"):
         h += "<h3>🔗 Dependencias</h3><ul>"
         for d in p["dependencies"]:
-            h += f"<li>{d}</li>"
+            h += f'<li style="list-style-type:disc;margin:2px 0;">{d}</li>'
         h += "</ul>"
     if p.get("tech_notes"):
         h += "<h3>💡 Notas Técnicas</h3><ul>"
         for n in p["tech_notes"]:
-            h += f"<li>{n}</li>"
+            h += f'<li style="list-style-type:disc;margin:2px 0;">{n}</li>'
         h += "</ul>"
     return h
 
