@@ -751,12 +751,12 @@ def pbi_to_html_with_urls(p, attachment_urls=None, figma_link=None):
 
 # ========== GENERATION ==========
 
-def generate_pbis(module, feature, description, context, images):
+def generate_pbis(module, feature, role, description, context, images):
     client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
     user_content = []
-    text = f"MÓDULO: {module or 'No especificado'}\nFEATURE: {feature or 'No especificada'}\n\nIMPORTANTE: El título de cada PBI DEBE comenzar exactamente con '{module} - {feature} - US X.X - ' seguido de la acción concreta. No omitas estos prefijos.\n\nDESCRIPCIÓN:\n{description}"
+    text = f"MÓDULO: {module or 'No especificado'}\nFEATURE: {feature or 'No especificada'}\nROL AFECTADO: {role}\n\nIMPORTANTE: El título de cada PBI DEBE comenzar exactamente con '{module} - {feature} - US X.X - ' seguido de la acción concreta. No omitas estos prefijos.\n\nDESCRIPCIÓN:\n{description}"
     if context:
-        text += f"\n\nCONTEXTO TÉCNICO:\n{context}"
+        text += f"\n\nCONTEXTO ADICIONAL:\n{context}"
     if images:
         text += f"\n\nSe adjuntan {len(images)} captura(s) del prototipo (Captura 1, 2...). Analízalas y referéncialas en los PBIs."
     user_content.append({"type": "text", "text": text})
@@ -1336,6 +1336,13 @@ with col_form:
             feature = st.text_input("Título — parte 2", placeholder="Ej: Reports, Solicitudes, Configuración...", key="feature_input")
         st.caption("Claude completará el título con la acción concreta según tu descripción")
 
+        role = st.selectbox(
+            "Rol afectado *",
+            options=["Colaborador", "Responsable", "perfil RRHH"],
+            key="role_input",
+            help="Perfil de Endalia que protagoniza esta historia de usuario"
+        )
+
         # Description with complexity indicator
         description = st.text_area(
             "Descripción funcional *",
@@ -1363,8 +1370,9 @@ with col_form:
                 st.caption("Texto dictado — cópialo y pégalo en la descripción:")
                 st.code(st.session_state["last_voice_text"], language=None)
 
-        context = st.text_area("Contexto técnico (opcional)",
-            placeholder="Endpoints, dependencias, restricciones...", height=70, key="context_input")
+        context = st.text_area("Contexto adicional (opcional)",
+            placeholder="Restricciones de negocio, comportamientos no visibles en el prototipo, dependencias con otros módulos...",
+            height=70, key="context_input")
 
         st.markdown("**🎨 Prototipo**")
         figma_available = "FIGMA_TOKEN" in st.secrets
@@ -1427,6 +1435,7 @@ if generate_btn:
     description = st.session_state.get("desc_input", "")
     module = st.session_state.get("module_input", "")
     feature = st.session_state.get("feature_input", "")
+    role = st.session_state.get("role_input", "perfil RRHH")
     context = st.session_state.get("context_input", "")
     if not description.strip():
         with col_form:
@@ -1447,7 +1456,7 @@ if generate_btn:
         with col_results:
             with st.spinner("Analizando y generando PBIs..."):
                 try:
-                    result = generate_pbis(module, feature, description, context, all_images)
+                    result = generate_pbis(module, feature, role, description, context, all_images)
                     st.session_state["result"] = result
                     st.rerun()
                 except Exception as e:
