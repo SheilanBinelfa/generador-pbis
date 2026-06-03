@@ -659,11 +659,71 @@ def get_figma_images(file_key, node_ids, figma_token):
 
 # ========== HTML FORMATTING ==========
 
+def _render_functional_spec(spec_text):
+    """
+    Converts structured plain-text functional spec into HTML.
+    - Lines in ALL CAPS (zone headers) → <h4>
+    - Lines starting with '- ' → grouped into <ul><li>
+    - Empty lines → close any open list, add spacing
+    - Other lines → <p>
+    """
+    lines = spec_text.splitlines()
+    html = ""
+    in_list = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        if not stripped:
+            if in_list:
+                html += "</ul>"
+                in_list = False
+            continue
+
+        # Zone header detection:
+        # Starts with 2+ uppercase words, may have lowercase in parentheses or quotes
+        # e.g. "ÁREA PRINCIPAL", "ESTADO VACÍO (sin tipos añadidos)", "MODAL LATERAL 'Añadir...'"
+        import re as _re
+        first_word = stripped.split()[0] if stripped.split() else ""
+        is_header = (
+            not stripped.startswith("-")
+            and not stripped.startswith("[")
+            and len(stripped) >= 3
+            and first_word == first_word.upper()
+            and first_word.isalpha()
+            and bool(_re.match(r'^[A-ZÁÉÍÓÚÜÑ][A-ZÁÉÍÓÚÜÑ\s]+', stripped))
+        )
+
+        if is_header:
+            if in_list:
+                html += "</ul>"
+                in_list = False
+            html += f"<h4><b>{stripped}</b></h4>"
+
+        elif stripped.startswith("- "):
+            if not in_list:
+                html += "<ul>"
+                in_list = True
+            html += f"<li>{stripped[2:]}</li>"
+
+        else:
+            if in_list:
+                html += "</ul>"
+                in_list = False
+            html += f"<p>{stripped}</p>"
+
+    if in_list:
+        html += "</ul>"
+
+    return html
+
+
 def _build_pbi_html_body(p):
     h = f"<h2>{p['title']}</h2>"
     h += f"<h3>🎯 Objetivo</h3><p>{p['objective']}</p>"
     if p.get("functional_spec"):
-        h += f"<h3>📋 Especificación funcional</h3><p>{p['functional_spec'].replace(chr(10), '<br>')}</p>"
+        h += "<h3>📋 Especificación funcional</h3>"
+        h += _render_functional_spec(p["functional_spec"])
     h += "<h3>👤 Historia de Usuario</h3>"
     h += f"<p><b>Como</b> {p['role']}<br><b>Cuando</b> {p['when']}<br><b>Entonces</b> {p['then']}<br><b>Para</b> {p['benefit']}</p>"
     h += "<h3>✅ Criterios de Aceptación</h3><h4>Happy Path</h4><ul>"
