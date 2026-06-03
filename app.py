@@ -875,12 +875,20 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
 
     # ── Card header ──
     pushed_info = st.session_state.get(pushed_key, None)
-    pushed_badge = f'<span class="pbi-pushed-badge">✅ #{pushed_info}</span>' if pushed_info else ""
+    pushed_badge = f'<span style="background:#064e3b;color:#6ee7b7;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:6px;">✅ #{pushed_info}</span>' if pushed_info else ""
+    role_val = pbi.get("role", "")
+    role_color = {"Colaborador": "#0ea5e9", "Responsable": "#8b5cf6", "perfil RRHH": "#f59e0b"}.get(role_val, "#64748b")
+    role_bg = {"Colaborador": "#e0f2fe", "Responsable": "#ede9fe", "perfil RRHH": "#fef3c7"}.get(role_val, "#f1f5f9")
+    role_badge = f'<span style="background:{role_bg};color:{role_color};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;">{role_val}</span>' if role_val else ""
+    pbi_num_badge = f'<span style="background:#1e293b;color:#94a3b8;border-radius:4px;padding:2px 8px;font-size:11px;font-family:monospace;">US {idx+1}/{total}</span>'
     st.markdown(f"""
-    <div class="pbi-card-header" style="border-radius:8px 8px 0 0;">
-        <span class="pbi-card-title">{pbi['title']}</span>
-        <span class="pbi-card-num">US {idx+1}/{total}</span>
-        {pushed_badge}
+    <div style="background:#0f172a;border-radius:8px 8px 0 0;padding:12px 16px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+            {pbi_num_badge}
+            {role_badge}
+            {pushed_badge}
+        </div>
+        <div style="color:#f8fafc;font-size:14px;font-weight:600;line-height:1.4;">{pbi['title']}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1026,57 +1034,132 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
                         except Exception as e:
                             st.error(f"Error: {e}")
 
-    pbi["objective"] = st.text_input("🎯 Objetivo", pbi["objective"], key=f"obj_{idx}")
+    # ── Objective ──
+    st.markdown(f"""
+    <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 16px;margin:8px 0 4px 0;">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#64748b;margin-bottom:4px;">Objetivo</div>
+        <div style="font-size:14px;color:#0f172a;line-height:1.5;">{pbi.get('objective','')}</div>
+    </div>
+    """, unsafe_allow_html=True)
+    with st.expander("✏️ Editar objetivo"):
+        pbi["objective"] = st.text_input("Objetivo", pbi["objective"], key=f"obj_{idx}", label_visibility="collapsed")
 
+    # ── Historia de Usuario ──
+    st.markdown(f"""
+    <div style="border-left:3px solid #2563EB;background:#f0f6ff;border-radius:0 8px 8px 0;padding:12px 16px;margin:10px 0 4px 0;">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#2563EB;margin-bottom:8px;">Historia de usuario</div>
+        <div style="font-size:13px;color:#1e3a5f;line-height:1.7;">
+            <span style="color:#64748b;font-weight:600;">Como</span> {pbi.get('role','')}<br>
+            <span style="color:#64748b;font-weight:600;">Cuando</span> {pbi.get('when','')}<br>
+            <span style="color:#64748b;font-weight:600;">Entonces</span> {pbi.get('then','')}<br>
+            <span style="color:#64748b;font-weight:600;">Para</span> {pbi.get('benefit','')}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    with st.expander("✏️ Editar historia de usuario"):
+        pbi["role"] = st.text_input("Como", pbi["role"], key=f"role_{idx}")
+        pbi["when"] = st.text_input("Cuando", pbi["when"], key=f"when_{idx}")
+        pbi["then"] = st.text_input("Entonces", pbi["then"], key=f"then_{idx}")
+        pbi["benefit"] = st.text_input("Para", pbi["benefit"], key=f"ben_{idx}")
+
+    # ── Spec funcional colapsable ──
     if pbi.get("functional_spec"):
-        st.markdown("**📋 Especificación funcional**")
-        pbi["functional_spec"] = st.text_area(
-            "spec", pbi["functional_spec"],
-            key=f"spec_{idx}", height=200, label_visibility="collapsed"
+        with st.expander("📋 Especificación funcional", expanded=False):
+            pbi["functional_spec"] = st.text_area(
+                "spec", pbi["functional_spec"],
+                key=f"spec_{idx}", height=300, label_visibility="collapsed"
+            )
+
+    # ── Criterios de aceptación ──
+    st.markdown("<div style='margin-top:12px;'></div>", unsafe_allow_html=True)
+
+    if pbi.get("happy_path"):
+        items_html = "".join(
+            f'<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #d1fae5;">'
+            f'<span style="color:#10b981;font-size:14px;margin-top:1px;flex-shrink:0;">✓</span>'
+            f'<span style="font-size:13px;color:#064e3b;line-height:1.5;">{ac}</span></div>'
+            for ac in pbi["happy_path"]
         )
-
-    st.markdown("**👤 Historia de Usuario**")
-    pbi["role"] = st.text_input("Como", pbi["role"], key=f"role_{idx}", label_visibility="collapsed")
-    pbi["when"] = st.text_input("Cuando", pbi["when"], key=f"when_{idx}", label_visibility="collapsed")
-    pbi["then"] = st.text_input("Entonces", pbi["then"], key=f"then_{idx}", label_visibility="collapsed")
-    pbi["benefit"] = st.text_input("Para", pbi["benefit"], key=f"ben_{idx}", label_visibility="collapsed")
-
-    st.markdown("**✅ Happy Path**")
-    for i, ac in enumerate(pbi.get("happy_path", [])):
-        pbi["happy_path"][i] = st.text_input(f"AC{i+1}", ac, key=f"hp_{idx}_{i}", label_visibility="collapsed")
+        st.markdown(f"""
+        <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:12px 16px;margin-bottom:8px;">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#16a34a;margin-bottom:8px;">✅ Happy Path</div>
+            {items_html}
+        </div>
+        """, unsafe_allow_html=True)
+        with st.expander("✏️ Editar happy path"):
+            for i, ac in enumerate(pbi["happy_path"]):
+                pbi["happy_path"][i] = st.text_input(f"HP {i+1}", ac, key=f"hp_{idx}_{i}")
 
     if pbi.get("validations"):
-        st.markdown("**⚠️ Validaciones**")
-        for i, v in enumerate(pbi["validations"]):
-            pbi["validations"][i] = st.text_input(f"V{i+1}", v, key=f"v_{idx}_{i}", label_visibility="collapsed")
+        items_html = "".join(
+            f'<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #fde68a;">'
+            f'<span style="color:#d97706;font-size:14px;margin-top:1px;flex-shrink:0;">⚠</span>'
+            f'<span style="font-size:13px;color:#78350f;line-height:1.5;">{v}</span></div>'
+            for v in pbi["validations"]
+        )
+        st.markdown(f"""
+        <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 16px;margin-bottom:8px;">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#d97706;margin-bottom:8px;">⚠️ Validaciones y edge cases</div>
+            {items_html}
+        </div>
+        """, unsafe_allow_html=True)
+        with st.expander("✏️ Editar validaciones"):
+            for i, v in enumerate(pbi["validations"]):
+                pbi["validations"][i] = st.text_input(f"V {i+1}", v, key=f"v_{idx}_{i}")
 
     if pbi.get("error_states"):
-        st.markdown("**🚨 Estados de Error**")
-        for i, e in enumerate(pbi["error_states"]):
-            pbi["error_states"][i] = st.text_input(f"E{i+1}", e, key=f"e_{idx}_{i}", label_visibility="collapsed")
+        items_html = "".join(
+            f'<div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid #fecaca;">'
+            f'<span style="color:#ef4444;font-size:14px;margin-top:1px;flex-shrink:0;">✕</span>'
+            f'<span style="font-size:13px;color:#7f1d1d;line-height:1.5;">{e}</span></div>'
+            for e in pbi["error_states"]
+        )
+        st.markdown(f"""
+        <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:12px 16px;margin-bottom:8px;">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#ef4444;margin-bottom:8px;">🚨 Estados de error</div>
+            {items_html}
+        </div>
+        """, unsafe_allow_html=True)
+        with st.expander("✏️ Editar estados de error"):
+            for i, e in enumerate(pbi["error_states"]):
+                pbi["error_states"][i] = st.text_input(f"E {i+1}", e, key=f"e_{idx}_{i}")
 
+    # ── Prototipo ──
     if pbi.get("prototype_refs") or "figma_images" in st.session_state or "uploaded_b64" in st.session_state:
-        st.markdown("**🖼️ Prototipo**")
-        if figma_link:
-            st.markdown(f"[🔗 Ver prototipo en Figma]({figma_link})")
-        all_imgs = []
-        if "figma_images" in st.session_state:
-            all_imgs += [base64.b64decode(img["data"]) for img in st.session_state["figma_images"]]
-        if "uploaded_b64" in st.session_state:
-            all_imgs += [base64.b64decode(b) for b in st.session_state["uploaded_b64"]]
-        if all_imgs:
-            img_cols = st.columns(min(len(all_imgs), 3))
-            for ci, img_bytes in enumerate(all_imgs):
-                with img_cols[ci % 3]:
-                    st.image(img_bytes, caption=f"Captura {ci+1}", use_container_width=True)
-        if pbi.get("prototype_refs"):
-            for i, r in enumerate(pbi["prototype_refs"]):
-                pbi["prototype_refs"][i] = st.text_input(f"P{i+1}", r, key=f"pr_{idx}_{i}", label_visibility="collapsed")
+        with st.expander("🖼️ Prototipo"):
+            if figma_link:
+                st.markdown(f"[🔗 Ver prototipo en Figma]({figma_link})")
+            all_imgs = []
+            if "figma_images" in st.session_state:
+                all_imgs += [base64.b64decode(img["data"]) for img in st.session_state["figma_images"]]
+            if "uploaded_b64" in st.session_state:
+                all_imgs += [base64.b64decode(b) for b in st.session_state["uploaded_b64"]]
+            if all_imgs:
+                img_cols = st.columns(min(len(all_imgs), 3))
+                for ci, img_bytes in enumerate(all_imgs):
+                    with img_cols[ci % 3]:
+                        st.image(img_bytes, caption=f"Captura {ci+1}", use_container_width=True)
+            if pbi.get("prototype_refs"):
+                for i, r in enumerate(pbi["prototype_refs"]):
+                    pbi["prototype_refs"][i] = st.text_input(f"P{i+1}", r, key=f"pr_{idx}_{i}", label_visibility="collapsed")
 
+    # ── Notas técnicas ──
     if pbi.get("tech_notes"):
-        st.markdown("**💡 Notas Técnicas**")
-        for i, n in enumerate(pbi["tech_notes"]):
-            pbi["tech_notes"][i] = st.text_input(f"N{i+1}", n, key=f"tn_{idx}_{i}", label_visibility="collapsed")
+        notes_html = "".join(
+            f'<div style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;">'
+            f'<span style="color:#6366f1;font-size:13px;flex-shrink:0;">?</span>'
+            f'<span style="font-size:13px;color:#312e81;line-height:1.5;">{n}</span></div>'
+            for n in pbi["tech_notes"]
+        )
+        st.markdown(f"""
+        <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:12px 16px;margin-bottom:8px;">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:#6366f1;margin-bottom:8px;">💡 Notas técnicas</div>
+            {notes_html}
+        </div>
+        """, unsafe_allow_html=True)
+        with st.expander("✏️ Editar notas técnicas"):
+            for i, n in enumerate(pbi["tech_notes"]):
+                pbi["tech_notes"][i] = st.text_input(f"N {i+1}", n, key=f"tn_{idx}_{i}")
 
 
 
