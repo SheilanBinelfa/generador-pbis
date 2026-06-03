@@ -900,12 +900,12 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
     col_copy, col_push = st.columns([1, 1])
     with col_copy:
         st.components.v1.html(f"""
-        <div style="padding:4px 0;">
+        <div style="margin:0;padding:0;">
             <button onclick="copyHtml_{idx}()" style="width:100%;background:#6366f1;color:#fff;border:none;border-radius:8px;
-                padding:9px 0;cursor:pointer;font-size:13px;font-weight:600;font-family:\'IBM Plex Sans\',sans-serif;">
+                padding:8px 0;cursor:pointer;font-size:13px;font-weight:600;font-family:\'IBM Plex Sans\',sans-serif;height:38px;box-sizing:border-box;">
                 📋 Copiar para Azure
             </button>
-            <div id="copied_{idx}" style="margin-top:6px;font-size:12px;color:#10b981;display:none;text-align:center;">✓ Copiado al portapapeles</div>
+            <div id="copied_{idx}" style="margin-top:4px;font-size:11px;color:#10b981;display:none;text-align:center;position:absolute;">✓ Copiado</div>
         </div>
         <script>
         async function copyHtml_{idx}() {{
@@ -927,7 +927,7 @@ def render_pbi_card(pbi, idx, total, default_iteration="", default_area="", defa
             const s = document.getElementById("copied_{idx}");
             s.style.display = "block"; setTimeout(() => s.style.display = "none", 2500);
         }}
-        </script>""", height=60)
+        </script>""", height=38)
 
     azure_available = bool(st.session_state.get("user_pat") or st.secrets.get("AZURE_PAT"))
     with col_push:
