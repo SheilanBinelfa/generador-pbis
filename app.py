@@ -67,6 +67,109 @@ Usa comillas simples para nombres de campos/secciones y comillas dobles para tex
 
 ---
 
+
+## DESIGN SYSTEM SOUL — PATRONES DE COMPONENTES WEB
+
+Endalia usa el Design System "Soul Web Components". Usa SIEMPRE los nombres exactos de estos componentes. No inventes componentes ni comportamientos que no estén aquí.
+
+### FEEDBACK
+
+**Alert** (banner informativo inline, NO flotante)
+- Tipos: `info` (azul), `warning` (amarillo), `error` (rojo). NO existe `success` en Alert.
+- Variantes: solo texto | texto + link | texto con negrita | con botón de cierre (×)
+- Una sola línea de texto, sin título separado. Uso: mensajes contextuales dentro de pantalla.
+- Nomenclatura: "banner de tipo info/warning/error"
+
+**Toast** (notificación flotante temporal, en esquina de pantalla)
+- Subtipos: `Toast Informative` (solo lectura) | `Toast Interactive` (con link de acción)
+- Tipos: `success` (verde), `warning` (amarillo), `error` (rojo), `info` (azul)
+- Siempre tiene botón de cierre (×). Con o sin descripción secundaria.
+- Uso: confirmaciones de acciones (guardar, eliminar). NO para validaciones de formulario.
+
+**Chip Feedback** (etiqueta de estado, no interactiva)
+- Tipos: `success` (verde), `info` (azul), `warning` (amarillo), `error` (rojo), `neutral` (gris)
+- Sin acción de click. Solo visual. Nomenclatura: "chip de estado [tipo]"
+
+**Tooltip** — texto informativo al hover. Posiciones: Up/Down/Left × Left/Right/Center.
+
+### INPUTS DE FORMULARIO
+
+**Text Field Simple**
+- Estados: vacío (placeholder), con valor, hover, focus, disabled, error
+- Estructura: Label + input + texto de ayuda opcional + mensaje de error (rojo, icono ⊗)
+- Errores: SOLO al salir del campo (on blur). NUNCA al cargar la pantalla.
+- Opciones: icono ⓘ en label, sufijo de texto, asterisco (*) en obligatorios
+
+**Input Suffix** — Text Field Simple con sufijo fijo (ej: "día/s", "meses", "%")
+
+**Select** — dropdown selección única. Estados: vacío, con valor, disabled, error.
+- Errores igual que Text Field Simple: solo al interactuar.
+- Si solo hay una opción disponible en esta versión: NO se muestra el Select, se elimina el selector y se muestra directamente el formulario correspondiente.
+
+**Switch Button Input** (toggle)
+- Estados: on (azul), off (gris), on-disabled, off-disabled
+- Puede mostrar mensaje informativo (azul) o alerta (amarillo). NO tiene estado error rojo.
+
+**Checkbox Input** — selección múltiple bajo label común. Cada opción puede tener ayuda.
+**Radio Button Input** — selección única. Siempre una opción seleccionada por defecto. No permite deseleccionar.
+
+**Reglas globales de formularios en Endalia:**
+- Errores de campo: ÚNICAMENTE on blur, nunca al cargar
+- Botón Guardar/Continuar: deshabilitado mientras haya campos obligatorios vacíos o con error
+- Mensaje error campo vacío obligatorio: "Campo obligatorio"
+- No se puede avanzar en wizard hasta que todos los campos obligatorios estén correctos
+
+### CONTENEDORES
+
+**Collapsable Container**
+- Header clickable con chevron (▶ cerrado / ▼ abierto)
+- Estado por defecto: EXPANDIDO salvo que se especifique lo contrario
+- Header puede incluir: chip de estado, icono ⓘ
+- Nomenclatura: "sección colapsable '[Nombre]', expandida por defecto"
+
+**Modal Dialog** — 3 tamaños: pequeño (confirmación), mediano (formulario), grande (lateral)
+- Siempre: título + botón cierre (×) + footer con "Cancelar" (secundario) + acción primaria (azul)
+- Botón primario deshabilitado si hay campos obligatorios sin completar
+- NO cierra al hacer click fuera — solo con botón ×
+
+**Assistant Stepper** (wizard de pasos — el componente de creación en Endalia)
+- Pasos secuenciales numerados: completado (✓ azul), activo (azul), pendiente (gris)
+- Al avanzar al siguiente paso: los errores de validación se detectan SOLO al pulsar "Siguiente", el disabled del botón se usa SOLO mientras el error está visible
+- Retroceder: si los pasos NO crean lógicas internas → vuelve al paso anterior sin modal. Si los pasos SÍ crean lógicas internas → muestra modal de confirmación antes de retroceder.
+- Pantallas finales del wizard: siempre hay un resumen antes de lanzar el proceso (obligatorio como paso final)
+- Procesos en segundo plano: cuando se lanza el proceso, pasa a pantalla de inicio y se muestra loader. Si se puede guardar como borrador al salir → modal de confirmación. Si NO se puede guardar → modal de advertencia de pérdida de datos.
+- Selección de empleados: siempre usar el diseño estándar de selección de empleados (panel izquierdo lista, panel derecho seleccionados)
+- Pantalla de revisión de conflictos: siempre con el diseño estándar si aplica
+
+### BOTONES
+
+**Text & Icon Button** / **Text Button** — botones con/sin icono
+- Variantes: `accent` (azul sólido, acción principal), `accent outline` (borde azul), `variant` (gris/neutro), `danger` (rojo, acciones destructivas), `danger outline`, `success` (verde), `success outline`
+- Tamaños: M (mediano, por defecto), S (pequeño)
+- Estados: default, hover, disabled, down, focus
+
+**Icon Button** — solo icono, sin texto
+**Link Button** — texto con estilo enlace, sin fondo
+**Chip Interactive Select** — chip seleccionable/deseleccionable (estados: default, hover, selected, focus). No confundir con Chip Feedback.
+**Chip Interactive Multiselect** — igual pero permite múltiple selección simultánea.
+
+### VISUALIZACIÓN DE DATOS
+
+**Data Display** — componente para mostrar un campo de solo lectura con label
+- Estructura: icono + Label + valor + subtítulo opcional + acción opcional (botón S)
+- Tamaños: M y S
+- Regla: nunca usar botón de acción y help text a la vez
+- Uso: para mostrar datos en modo lectura dentro de formularios o paneles de detalle
+
+**Avatar** — foto de perfil del empleado. Con iniciales como fallback.
+**Popover** — panel flotante con información adicional al hover o click.
+
+---
+
+⚠️ REGLA CRÍTICA: Si aparece un comportamiento o componente que NO está en este diccionario, márcalo con [⚠️ A CONFIRMAR] en vez de inventarlo. Ej: "[⚠️ A CONFIRMAR] ¿Qué componente Soul se usa aquí?"
+
+---
+
 ## REGLAS GENERALES
 
 - **La descripción de la feature es la fuente de la intención de negocio.** Si indica que algo no debe desarrollarse (aunque esté en el prototipo), omítelo de la especificación.
